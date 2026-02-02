@@ -1,8 +1,8 @@
 # cryosnap
 
-Rust 版 Freeze：面向 CLI / Rust library / Node & TypeScript 绑定的代码与终端输出截图工具。
+面向 CLI / Rust library / Node & TypeScript 绑定的代码与终端输出截图工具。
 
-中文 | English
+[中文](#中文) | [English](#english)
 
 ---
 
@@ -231,7 +231,7 @@ renderToFile(
 ```bash
 cargo test --workspace
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo llvm-cov --workspace --ignore-filename-regex "cryosnap-node" --fail-under-lines 70
+cargo llvm-cov --workspace --ignore-filename-regex "cryosnap-node" --fail-under-lines 80
 ```
 
 ### 发布流程（cargo-release + cargo-dist）
@@ -309,21 +309,77 @@ cargo build --release
 ### CLI Usage
 
 ```bash
+# File -> PNG
 cryosnap main.rs -o out.png
+
+# stdin -> SVG
 cat main.rs | cryosnap --language rust -o out.svg
+
+# ANSI command output
 cryosnap --execute "eza -lah" -o out.png
+
+# Multi-format output
 cryosnap main.rs --output out.{svg,png,webp}
+
+# tmux capture-pane -> PNG (escape % in zsh)
 cryosnap --tmux --tmux-args "-t %3 -S -200 -J" --config full -o out.png
 ```
 
-### PNG Optimization
+Default behavior: when stdout is a TTY and `--output/--format` is not provided, it writes `cryosnap.png`.
+
+Show all options:
 
 ```bash
+cryosnap --help
+```
+
+### Configuration
+
+Built-in configs:
+
+```bash
+cryosnap --config base
+cryosnap --config full
+cryosnap --config user
+```
+
+Config path priority:
+
+1. `CRYOSNAP_CONFIG_PATH`
+2. `CRYOSNAP_CONFIG_DIR` (reads `user.json`)
+3. System config directory (`ProjectDirs`)
+
+### PNG Optimization
+
+Lossless optimization (no quality loss):
+
+```bash
+# Disable lossless optimization
 cryosnap main.rs -o out.png --png-opt=false
+
+# Optimize level (0-6)
+cryosnap main.rs -o out.png --png-opt-level 4
+
+# Metadata stripping
+cryosnap main.rs -o out.png --png-strip safe
+```
+
+Lossy quantization (smaller size with slight quality loss):
+
+```bash
+# Enable quantization
+cryosnap main.rs -o out.png --png-quant
+
+# Preset (fast/balanced/best)
 cryosnap main.rs -o out.png --png-quant-preset balanced
+
+# Custom quality/speed/dither
+cryosnap main.rs -o out.png --png-quant-quality 85 --png-quant-speed 4 --png-quant-dither 1
 ```
 
 ### Raster Backend
+
+Default uses pure Rust (resvg/tiny-skia). If `rsvg-convert` is available, you can opt in:
 
 ```bash
 cryosnap main.rs -o out.png --raster.backend auto
@@ -331,18 +387,108 @@ cryosnap main.rs -o out.png --raster.backend rsvg
 cryosnap main.rs -o out.png --raster.backend resvg
 ```
 
-### Development
+### Fonts & Nerd Font
+
+Built-in `Hack Nerd Font` can be used via `font.family`:
+
+```bash
+cryosnap main.rs -o out.png --font.family "Hack Nerd Font"
+```
+
+### Title Bar
+
+Enabled by default. For file input it shows the **absolute path**; for tmux it shows:
+`#{session_name}:#{window_index}.#{pane_index} #{pane_title}`.
+
+```bash
+# Disable title
+cryosnap main.rs -o out.png --title=false
+
+# Override title text
+cryosnap main.rs -o out.png --title.text "hello"
+
+# Custom tmux title format
+cryosnap --tmux --tmux-args "-t %7 -S -200 -J" \
+  --title.tmux-format "#{session_name}:#{window_name} · #{pane_current_path}" \
+  -o out.png
+```
+
+### Performance Tips
+
+```bash
+# Lower raster scale
+cryosnap main.rs -o out.png --raster.scale 2
+
+# Limit max pixels (0 = no limit)
+cryosnap main.rs -o out.png --raster.max-pixels 8000000
+
+# Disable PNG optimization for max speed
+cryosnap main.rs -o out.png --png-opt=false
+```
+
+### Rust Library Usage
+
+```rust
+use cryosnap_core::{Config, InputSource, OutputFormat, RenderRequest};
+
+let request = RenderRequest {
+    input: InputSource::Text("fn main() {}".to_string()),
+    config: Config::default(),
+    format: OutputFormat::Svg,
+};
+
+let result = cryosnap_core::render(&request).unwrap();
+std::fs::write("out.svg", result.bytes).unwrap();
+```
+
+### Node / TypeScript Bindings
+
+```bash
+cd crates/cryosnap-node
+npm install
+npm run build
+```
+
+Published version (npm):
+
+```bash
+npm install cryosnap
+```
+
+```ts
+import { render, renderToFile } from "cryosnap";
+
+const bytes = render({
+  input: "console.log('hi')",
+  inputKind: "text",
+  config: {
+    theme: "charm",
+    window: true,
+    showLineNumbers: true,
+    padding: [20, 40, 20, 20],
+    lineHeight: 1.2
+  },
+  format: "png"
+});
+
+require("fs").writeFileSync("out.png", bytes);
+
+renderToFile(
+  {
+    input: "console.log('hi')",
+    inputKind: "text",
+    config: { theme: "charm" }
+  },
+  "out.webp"
+);
+```
+
+### Development & Testing
 
 ```bash
 cargo test --workspace
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo llvm-cov --workspace --ignore-filename-regex "cryosnap-node" --fail-under-lines 70
-```
-
-### Node Package
-
-```bash
-npm install cryosnap
+cargo llvm-cov --workspace --ignore-filename-regex "cryosnap-node" --fail-under-lines 80
 ```
 
 ### Release Flow
@@ -351,6 +497,8 @@ npm install cryosnap
 cargo release patch --workspace --dry-run
 cargo release patch --workspace --execute
 ```
+
+Pushing the tag will trigger GitHub Actions to publish cargo-dist artifacts.
 
 Publish to crates.io:
 
@@ -369,3 +517,8 @@ npm publish
 ### License
 
 MIT, see `LICENSE`.
+
+### Third-party Licenses
+
+- JetBrains Mono font: SIL Open Font License 1.1 (see `assets/JetBrainsMono-OFL-1.1.txt`)
+- Hack Nerd Font: see `assets/HackNerdFont-LICENSE.md`
