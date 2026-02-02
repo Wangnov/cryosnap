@@ -1,6 +1,14 @@
 # cryosnap
 
 面向 CLI / Rust library / Node & TypeScript 绑定的代码与终端输出截图工具。
+| Code and terminal screenshot tool for CLI / Rust library / Node & TypeScript bindings.
+
+[![CI](https://github.com/Wangnov/cryosnap/actions/workflows/ci.yml/badge.svg)](https://github.com/Wangnov/cryosnap/actions/workflows/ci.yml)
+[![Release](https://github.com/Wangnov/cryosnap/actions/workflows/release.yml/badge.svg)](https://github.com/Wangnov/cryosnap/actions/workflows/release.yml)
+[![Publish NAPI](https://github.com/Wangnov/cryosnap/actions/workflows/publish-napi.yml/badge.svg)](https://github.com/Wangnov/cryosnap/actions/workflows/publish-napi.yml)
+[![Crates.io](https://img.shields.io/crates/v/cryosnap.svg)](https://crates.io/crates/cryosnap)
+[![NPM](https://img.shields.io/npm/v/cryosnap.svg)](https://www.npmjs.com/package/cryosnap)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [中文](#中文) | [English](#english)
 
