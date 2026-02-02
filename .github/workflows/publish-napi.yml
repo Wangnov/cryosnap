@@ -76,7 +76,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: "https://registry.npmjs.org"
 
       - name: Ensure npm version
         run: npm install -g npm@11.5.1
@@ -109,10 +108,16 @@ jobs:
         run: |
           for dir in npm/*; do
             if [ -f "$dir/package.json" ]; then
-              npm publish --access public "./$dir"
+              npm publish --access public --provenance "./$dir"
             fi
           done
+        env:
+          NODE_AUTH_TOKEN: ""
+          NPM_CONFIG_PROVENANCE: "true"
 
       - name: Publish main package
         working-directory: crates/cryosnap-node
-        run: npm publish --access public
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ""
+          NPM_CONFIG_PROVENANCE: "true"
