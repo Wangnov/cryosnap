@@ -320,7 +320,7 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "cryosnap"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "atty",
  "clap",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "cryosnap-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "imagequant",
@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "cryosnap-node"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cryosnap-core",
  "napi",
