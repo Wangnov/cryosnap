@@ -51,7 +51,7 @@ jobs:
         working-directory: crates/cryosnap-node
         run: |
           npm exec --yes --package @napi-rs/cli napi -- \
-            build --release --platform --no-dts --no-js --output-dir artifacts ${{ matrix.build_args }}
+            build --release --platform --no-js --dts artifacts/ignored.d.ts --output-dir artifacts ${{ matrix.build_args }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
