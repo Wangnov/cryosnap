@@ -22,6 +22,7 @@ napi-build = "2.3.1"
 
 [workspace.metadata.release]
 tag-name = "v{{version}}"
+pre-release-hook = ["bash", "scripts/release-hook.sh", "{{version}}"]
 
 # The profile that 'dist' will build with
 [profile.dist]
