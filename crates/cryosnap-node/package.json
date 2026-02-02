@@ -28,8 +28,8 @@
     "*.node"
   ],
   "scripts": {
-    "build": "node -e \"require('fs').mkdirSync('tmp',{recursive:true})\" && napi build --release --no-js --dts tmp/ignored.d.ts",
-    "build:debug": "node -e \"require('fs').mkdirSync('tmp',{recursive:true})\" && napi build --no-js --dts tmp/ignored.d.ts"
+    "build": "node -e \"require('fs').mkdirSync('../../tmp',{recursive:true})\" && napi build --release --no-js --dts ../../tmp/cryosnap-node.d.ts",
+    "build:debug": "node -e \"require('fs').mkdirSync('../../tmp',{recursive:true})\" && napi build --no-js --dts ../../tmp/cryosnap-node.d.ts"
   },
   "napi": {
     "binaryName": "cryosnap"
