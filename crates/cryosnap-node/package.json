@@ -28,13 +28,13 @@
     "*.node"
   ],
   "scripts": {
-    "build": "napi build --release",
-    "build:debug": "napi build"
+    "build": "napi build --release --no-dts --no-js",
+    "build:debug": "napi build --no-dts --no-js"
   },
   "napi": {
-    "name": "cryosnap"
+    "binaryName": "cryosnap"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.0"
+    "@napi-rs/cli": "^3.5.1"
   }
 }
