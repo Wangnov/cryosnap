@@ -355,7 +355,20 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    run_with(
+        args,
+        atty::is(atty::Stream::Stdin),
+        atty::is(atty::Stream::Stdout),
+        None,
+    )
+}
 
+fn run_with(
+    args: Args,
+    stdin_is_tty: bool,
+    stdout_is_tty: bool,
+    stdin_override: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (mut config, is_default_config) = load_config(args.config.as_deref())?;
     let mut quantize_set = false;
     if let Some(background) = args.background {
@@ -507,7 +520,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut input_arg = args.input.clone();
     let mut execute_arg = args.execute.clone();
     if args.interactive {
-        if !atty::is(atty::Stream::Stdin) {
+        if !stdin_is_tty {
             return Err("interactive mode requires a TTY".into());
         }
         run_interactive(&mut config, &mut input_arg, &mut execute_arg)?;
@@ -542,12 +555,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         InputSource::Command(cmd)
     } else if let Some(input) = input_arg {
         if input == "-" {
-            InputSource::Text(read_stdin()?)
+            InputSource::Text(read_stdin_with(stdin_override)?)
         } else {
             InputSource::File(PathBuf::from(input))
         }
-    } else if !atty::is(atty::Stream::Stdin) {
-        InputSource::Text(read_stdin()?)
+    } else if !stdin_is_tty {
+        InputSource::Text(read_stdin_with(stdin_override)?)
     } else {
         let mut cmd = Args::command();
         cmd.print_help()?;
@@ -555,7 +568,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     };
 
-    let stdout_is_tty = atty::is(atty::Stream::Stdout);
     if let Some(output) = args.output.as_ref() {
         if let Some(expanded) = expand_output_pattern(output)? {
             if args.format.is_some() {
@@ -862,6 +874,13 @@ fn read_stdin() -> Result<String, io::Error> {
     let mut buffer = String::new();
     io::stdin().read_to_string(&mut buffer)?;
     Ok(buffer)
+}
+
+fn read_stdin_with(stdin_override: Option<&str>) -> Result<String, io::Error> {
+    if let Some(value) = stdin_override {
+        return Ok(value.to_string());
+    }
+    read_stdin()
 }
 
 fn capture_tmux_output(raw_args: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
@@ -1338,6 +1357,121 @@ mod tests {
     fn expand_output_pattern_invalid() {
         let err = expand_output_pattern(&PathBuf::from("out.{svg,png")).err();
         assert!(err.is_some());
+    }
+
+    #[test]
+    fn read_stdin_with_override() {
+        let out = read_stdin_with(Some("hello")).expect("read");
+        assert_eq!(out, "hello");
+    }
+
+    #[test]
+    fn run_with_rejects_tmux_execute_combo() {
+        let mut args = Args::parse_from(["cryosnap"]);
+        args.tmux = true;
+        args.execute = Some("echo hi".to_string());
+        let err = run_with(args, true, false, None).unwrap_err();
+        assert!(err.to_string().contains("tmux mode"));
+    }
+
+    #[test]
+    fn run_with_interactive_requires_tty() {
+        let mut args = Args::parse_from(["cryosnap"]);
+        args.interactive = true;
+        let err = run_with(args, false, false, None).unwrap_err();
+        assert!(err.to_string().contains("interactive mode requires a TTY"));
+    }
+
+    #[test]
+    fn run_with_output_pattern_conflicts_with_format() {
+        let dir = tempdir().expect("temp dir");
+        let mut args = Args::parse_from(["cryosnap"]);
+        args.input = Some("-".to_string());
+        args.output = Some(dir.path().join("out.{svg,png}"));
+        args.format = Some(FormatArg::Svg);
+        let err = run_with(args, false, false, Some("hello")).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("output patterns cannot be combined"));
+    }
+
+    #[test]
+    fn run_with_reads_stdin_when_piped() {
+        let dir = tempdir().expect("temp dir");
+        let out_path = dir.path().join("out.svg");
+        let mut args = Args::parse_from(["cryosnap"]);
+        args.output = Some(out_path.clone());
+        args.png_quant = Some(true);
+        let result = run_with(args, false, false, Some("hello"));
+        assert!(result.is_ok());
+        let content = std::fs::read_to_string(out_path).expect("read svg");
+        assert!(content.contains("<svg"));
+    }
+
+    #[test]
+    fn run_with_applies_many_overrides() {
+        let dir = tempdir().expect("temp dir");
+        let out_path = dir.path().join("out.svg");
+        let mut args = Args::parse_from(["cryosnap"]);
+        args.input = Some("-".to_string());
+        args.output = Some(out_path.clone());
+        args.background = Some("#101010".to_string());
+        args.padding = Some("1,2,3,4".to_string());
+        args.margin = Some("5,6".to_string());
+        args.width = Some(800.0);
+        args.height = Some(600.0);
+        args.theme = Some("charm".to_string());
+        args.language = Some("rust".to_string());
+        args.wrap = Some(80);
+        args.lines = Some("1,2".to_string());
+        args.window = Some(true);
+        args.show_line_numbers = Some(true);
+        args.border_radius = Some(4.0);
+        args.border_width = Some(1.0);
+        args.border_color = Some("#333333".to_string());
+        args.shadow_blur = Some(6.0);
+        args.shadow_x = Some(1.0);
+        args.shadow_y = Some(2.0);
+        args.font_family = Some("JetBrains Mono".to_string());
+        args.font_size = Some(12.0);
+        args.line_height = Some(1.4);
+        args.raster_scale = Some(2.0);
+        args.raster_max_pixels = Some(1_000_000);
+        args.raster_backend = Some(RasterBackendArg::Resvg);
+        args.font_ligatures = Some(false);
+        args.execute_timeout = Some("500ms".to_string());
+        args.png_opt = Some(false);
+        args.png_opt_level = Some(3);
+        args.png_strip = Some(PngStripArg::All);
+        args.png_quant_quality = Some(80);
+        args.png_quant_speed = Some(5);
+        args.png_quant_dither = Some(0.7);
+        args.png_quant_preset = Some(PngQuantPresetArg::Fast);
+        args.title = Some(true);
+        args.title_text = Some("Title".to_string());
+        args.title_path_style = Some(TitlePathStyleArg::Basename);
+        args.title_tmux_format = Some("format".to_string());
+        args.title_align = Some(TitleAlignArg::Right);
+        args.title_size = Some(10.0);
+        args.title_color = Some("#ffffff".to_string());
+        args.title_opacity = Some(0.7);
+        args.title_max_width = Some(30);
+        args.title_ellipsis = Some("..".to_string());
+
+        let result = run_with(args, false, false, Some("hello"));
+        assert!(result.is_ok());
+        assert!(out_path.exists());
+    }
+
+    #[test]
+    fn resolve_format_from_arg() {
+        let out = resolve_format(Some(FormatArg::Png), None);
+        assert!(matches!(out, OutputFormat::Png));
+    }
+
+    #[test]
+    fn format_from_extension_unknown() {
+        assert!(format_from_extension(Path::new("out.txt")).is_none());
     }
 
     #[test]

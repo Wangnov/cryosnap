@@ -49,4 +49,4 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Coverage
-        run: cargo llvm-cov --workspace --ignore-filename-regex "cryosnap-node" --fail-under-lines 70
+        run: cargo llvm-cov --workspace --ignore-filename-regex "cryosnap-node" --fail-under-lines 80

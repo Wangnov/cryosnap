@@ -2197,6 +2197,7 @@ static HACK_NERD_FONT_REGULAR: &[u8] = include_bytes!("../assets/HackNerdFont-Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
 
     #[test]
     fn deserialize_box_values() {
@@ -2335,6 +2336,135 @@ mod tests {
         let title = resolve_title_text(&input, &cfg).expect("title");
         assert!(Path::new(&title).is_absolute());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_title_text_disabled_returns_none() {
+        let cfg = Config {
+            window_controls: true,
+            title: TitleOptions {
+                enabled: false,
+                ..TitleOptions::default()
+            },
+            ..Config::default()
+        };
+        let input = InputSource::Text("hi".to_string());
+        assert!(resolve_title_text(&input, &cfg).is_none());
+    }
+
+    #[test]
+    fn resolve_title_text_window_controls_off_returns_none() {
+        let cfg = Config {
+            window_controls: false,
+            title: TitleOptions {
+                enabled: true,
+                text: Some("Title".to_string()),
+                ..TitleOptions::default()
+            },
+            ..Config::default()
+        };
+        let input = InputSource::Text("hi".to_string());
+        assert!(resolve_title_text(&input, &cfg).is_none());
+    }
+
+    #[test]
+    fn resolve_title_text_from_command() {
+        let cfg = Config {
+            window_controls: true,
+            ..Config::default()
+        };
+        let input = InputSource::Command("echo hi".to_string());
+        let title = resolve_title_text(&input, &cfg).expect("title");
+        assert!(title.contains("cmd: echo hi"));
+    }
+
+    #[test]
+    fn title_text_from_path_basename_and_relative() {
+        let _lock = cwd_lock().lock().expect("lock");
+        let root = std::env::temp_dir().join(format!("cryosnap-title-test-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("create temp dir");
+        let path = root.join("sample.txt");
+        std::fs::write(&path, "hi").expect("write temp");
+
+        let basename = title_text_from_path(&path, TitlePathStyle::Basename);
+        assert_eq!(basename, "sample.txt");
+
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(&root).expect("chdir");
+        let resolved = std::env::current_dir().expect("cwd").join("sample.txt");
+        let relative = title_text_from_path(&resolved, TitlePathStyle::Relative);
+        assert_eq!(relative, "sample.txt");
+        std::env::set_current_dir(cwd).expect("restore");
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sanitize_title_text_removes_newlines() {
+        let out = sanitize_title_text("hello\nworld\rtest");
+        assert_eq!(out, "hello world test");
+    }
+
+    #[test]
+    fn truncate_to_cells_edge_cases() {
+        assert_eq!(truncate_to_cells("abcdef", 0, "…"), "");
+        assert_eq!(truncate_to_cells("abcdef", 1, "..."), ".");
+    }
+
+    #[test]
+    fn unpremultiply_rgba_handles_zero_alpha() {
+        let data = [10u8, 20, 30, 0, 100, 50, 25, 128];
+        let out = unpremultiply_rgba(&data);
+        assert_eq!(&out[..4], &[0, 0, 0, 0]);
+        assert_eq!(out.len(), 8);
+    }
+
+    #[test]
+    fn encode_indexed_png_rejects_invalid_length() {
+        let palette = vec![imagequant::RGBA::new(0, 0, 0, 255)];
+        let indices = vec![0, 0];
+        let err = encode_indexed_png(&palette, &indices, 1, 1).unwrap_err();
+        assert!(err.to_string().contains("invalid index buffer"));
+    }
+
+    #[test]
+    fn render_webp_from_svg_rejects_rsvg_backend() {
+        let mut cfg = Config::default();
+        cfg.raster.backend = RasterBackend::Rsvg;
+        let svg = br#"<svg width="10" height="10" xmlns="http://www.w3.org/2000/svg"></svg>"#;
+        let err = render_webp_from_svg(svg, &cfg).unwrap_err();
+        assert!(err.to_string().contains("rsvg backend"));
+    }
+
+    #[test]
+    fn is_ansi_input_detects_escape() {
+        let loaded = LoadedInput {
+            text: "hi\x1b[31m".to_string(),
+            path: None,
+            kind: InputKind::Code,
+        };
+        let cfg = Config::default();
+        assert!(is_ansi_input(&loaded, &cfg));
+    }
+
+    #[test]
+    fn load_input_file_reads_text() {
+        let root = std::env::temp_dir().join(format!("cryosnap-load-input-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("create dir");
+        let path = root.join("input.txt");
+        std::fs::write(&path, "hello").expect("write");
+        let input = InputSource::File(path.clone());
+        let loaded = load_input(&input, Duration::from_millis(1000)).expect("load");
+        assert_eq!(loaded.text, "hello");
+        assert_eq!(loaded.path, Some(path));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn execute_command_rejects_empty() {
+        let err = execute_command("   ", Duration::from_millis(1000)).unwrap_err();
+        assert!(err.to_string().contains("empty command"));
     }
 
     #[test]
@@ -2552,5 +2682,10 @@ mod tests {
     fn execute_command_no_output() {
         let result = execute_command("printf ''", Duration::from_millis(2000));
         assert!(matches!(result, Err(Error::InvalidInput(_))));
+    }
+
+    fn cwd_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
     }
 }
