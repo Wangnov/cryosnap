@@ -32,7 +32,14 @@
     "build:debug": "node -e \"require('fs').mkdirSync('../../tmp',{recursive:true})\" && napi build --no-js --dts ../../tmp/cryosnap-node.d.ts"
   },
   "napi": {
-    "binaryName": "cryosnap"
+    "binaryName": "cryosnap",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc"
+    ]
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.5.1"
