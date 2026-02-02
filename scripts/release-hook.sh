@@ -12,4 +12,10 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 cd "$node_dir"
+current="$(node -p "require('./package.json').version")"
+if [ "$current" = "$version" ]; then
+  echo "cryosnap-node already at version $version; skipping npm version"
+  exit 0
+fi
+
 npm version "$version" --no-git-tag-version
