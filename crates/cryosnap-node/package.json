@@ -1,0 +1,23 @@
+{
+  "name": "cryosnap",
+  "version": "0.1.0",
+  "description": "Node/TS bindings for cryosnap",
+  "license": "MIT",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ],
+  "scripts": {
+    "build": "napi build --release",
+    "build:debug": "napi build"
+  },
+  "napi": {
+    "name": "cryosnap"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  }
+}

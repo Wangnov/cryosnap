@@ -1,0 +1,19 @@
+[package]
+name = "cryosnap-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Node/TS bindings for cryosnap."
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { workspace = true }
+napi-derive = { workspace = true }
+serde_json = { workspace = true }
+cryosnap-core = { path = "../cryosnap-core" }
+
+[build-dependencies]
+napi-build = { workspace = true }

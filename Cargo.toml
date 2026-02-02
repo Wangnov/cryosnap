@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/cryosnap-core",
+  "crates/cryosnap-cli",
+  "crates/cryosnap-node",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+clap = { version = "4.5.56", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+napi = { version = "3.8.2", features = ["napi6"] }
+napi-derive = "3.5.1"
+napi-build = "2.3.1"
+
+[workspace.metadata.release]
+tag-name = "v{{version}}"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

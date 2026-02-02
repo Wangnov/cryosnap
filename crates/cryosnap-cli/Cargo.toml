@@ -1,0 +1,21 @@
+[package]
+name = "cryosnap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI for cryosnap."
+repository = "https://github.com/Wangnov/cryosnap"
+readme = "../../README.md"
+
+[dependencies]
+clap = { workspace = true }
+serde_json = { workspace = true }
+atty = "0.2.14"
+dialoguer = "0.12.0"
+directories = "6.0.0"
+humantime = "2.3.0"
+shell-words = "1.1"
+cryosnap-core = { path = "../cryosnap-core" }
+
+[dev-dependencies]
+tempfile = "3.24.0"

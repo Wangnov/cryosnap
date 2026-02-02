@@ -1,0 +1,9 @@
+/target
+/crates/cryosnap-node/node_modules
+/crates/cryosnap-node/*.node
+/tmp
+/bench-*
+/cryosnap-*.png
+/cryosnap-*.svg
+*.log
+.DS_Store

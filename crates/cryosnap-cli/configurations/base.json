@@ -1,0 +1,53 @@
+{
+  "window": false,
+  "theme": "charm",
+  "border": {
+    "radius": 0,
+    "width": 0,
+    "color": "#515151"
+  },
+  "shadow": {
+    "blur": 0,
+    "x": 0,
+    "y": 0
+  },
+  "padding": [
+    20,
+    40,
+    20,
+    20
+  ],
+  "margin": "0",
+  "background": "#171717",
+  "font": {
+    "family": "JetBrains Mono",
+    "size": 14,
+    "ligatures": true
+  },
+  "line_height": 1.2,
+  "raster": {
+    "scale": 4,
+    "max_pixels": 8000000,
+    "backend": "auto"
+  },
+  "png": {
+    "optimize": true,
+    "level": 4,
+    "strip": "safe",
+    "quantize": false,
+    "quantize_quality": 85,
+    "quantize_speed": 4,
+    "quantize_dither": 1
+  },
+  "title": {
+    "enabled": true,
+    "path_style": "absolute",
+    "tmux_format": "#{session_name}:#{window_index}.#{pane_index} #{pane_title}",
+    "align": "center",
+    "size": 12,
+    "color": "#C5C8C6",
+    "opacity": 0.85,
+    "max_width": 80,
+    "ellipsis": "…"
+  }
+}
