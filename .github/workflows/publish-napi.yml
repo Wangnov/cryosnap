@@ -109,7 +109,7 @@ jobs:
         run: |
           for dir in npm/*; do
             if [ -f "$dir/package.json" ]; then
-              npm publish --access public "$dir"
+              npm publish --access public "./$dir"
             fi
           done
 
