@@ -5,7 +5,11 @@ edition.workspace = true
 license.workspace = true
 description = "CLI for cryosnap."
 repository = "https://github.com/Wangnov/cryosnap"
+homepage = "https://github.com/Wangnov/cryosnap"
+documentation = "https://docs.rs/cryosnap"
 readme = "../../README.md"
+keywords = ["screenshot", "code", "terminal", "svg", "png"]
+categories = ["command-line-utilities", "multimedia::images"]
 
 [dependencies]
 clap = { workspace = true }
@@ -15,7 +19,7 @@ dialoguer = "0.12.0"
 directories = "6.0.0"
 humantime = "2.3.0"
 shell-words = "1.1"
-cryosnap-core = { path = "../cryosnap-core" }
+cryosnap-core = { version = "0.1.0", path = "../cryosnap-core" }
 
 [dev-dependencies]
 tempfile = "3.24.0"

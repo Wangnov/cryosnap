@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 description = "Node/TS bindings for cryosnap."
 build = "build.rs"
+publish = false
+repository = "https://github.com/Wangnov/cryosnap"
 
 [lib]
 crate-type = ["cdylib"]

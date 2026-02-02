@@ -2190,9 +2190,9 @@ fn svg_font_face_css(config: &Config) -> Result<Option<String>> {
     )))
 }
 
-static JETBRAINS_MONO_REGULAR: &[u8] = include_bytes!("../../../assets/JetBrainsMono-Regular.ttf");
-static JETBRAINS_MONO_NL: &[u8] = include_bytes!("../../../assets/JetBrainsMonoNL-Regular.ttf");
-static HACK_NERD_FONT_REGULAR: &[u8] = include_bytes!("../../../assets/HackNerdFont-Regular.ttf");
+static JETBRAINS_MONO_REGULAR: &[u8] = include_bytes!("../assets/JetBrainsMono-Regular.ttf");
+static JETBRAINS_MONO_NL: &[u8] = include_bytes!("../assets/JetBrainsMonoNL-Regular.ttf");
+static HACK_NERD_FONT_REGULAR: &[u8] = include_bytes!("../assets/HackNerdFont-Regular.ttf");
 
 #[cfg(test)]
 mod tests {

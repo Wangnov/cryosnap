@@ -5,7 +5,11 @@ edition.workspace = true
 license.workspace = true
 description = "Core rendering library for cryosnap."
 repository = "https://github.com/Wangnov/cryosnap"
+homepage = "https://github.com/Wangnov/cryosnap"
+documentation = "https://docs.rs/cryosnap-core"
 readme = "../../README.md"
+keywords = ["rendering", "svg", "png", "terminal", "screenshot"]
+categories = ["graphics", "multimedia::images"]
 
 [dependencies]
 serde = { workspace = true }

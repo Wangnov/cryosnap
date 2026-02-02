@@ -3,6 +3,23 @@
   "version": "0.1.0",
   "description": "Node/TS bindings for cryosnap",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Wangnov/cryosnap.git",
+    "directory": "crates/cryosnap-node"
+  },
+  "homepage": "https://github.com/Wangnov/cryosnap#readme",
+  "bugs": {
+    "url": "https://github.com/Wangnov/cryosnap/issues"
+  },
+  "keywords": [
+    "screenshot",
+    "code",
+    "terminal",
+    "svg",
+    "png",
+    "napi"
+  ],
   "main": "index.js",
   "types": "index.d.ts",
   "files": [

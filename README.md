@@ -26,7 +26,17 @@ Rust 版 Freeze：面向 CLI / Rust library / Node & TypeScript 绑定的代码�
 
 ### 安装
 
-当前为源码形态，可直接从本仓库安装/构建：
+crates.io 安装（推荐）：
+
+```bash
+# CLI
+cargo install cryosnap
+
+# Rust 库
+cargo add cryosnap-core
+```
+
+源码安装：
 
 ```bash
 cargo install --path crates/cryosnap-cli
@@ -182,6 +192,12 @@ npm install
 npm run build
 ```
 
+发布版（npm）：
+
+```bash
+npm install cryosnap
+```
+
 ```ts
 import { render, renderToFile } from "cryosnap";
 
@@ -230,6 +246,20 @@ cargo release patch --workspace --execute
 # tag 会触发 GitHub Actions 的 cargo-dist 发布产物
 ```
 
+crates.io 发布顺序：
+
+```bash
+cargo publish -p cryosnap-core
+cargo publish -p cryosnap
+```
+
+npm 发布：
+
+```bash
+cd crates/cryosnap-node
+npm publish
+```
+
 ### 许可证
 
 MIT，详见 `LICENSE`。
@@ -260,6 +290,15 @@ MIT，详见 `LICENSE`。
 - Detailed styling: padding/margin/border/shadow/line-height/lines/wrap/line-numbers
 
 ### Install
+
+From crates.io (recommended):
+
+```bash
+cargo install cryosnap
+cargo add cryosnap-core
+```
+
+From source:
 
 ```bash
 cargo install --path crates/cryosnap-cli
@@ -300,11 +339,31 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo llvm-cov --workspace --ignore-filename-regex "cryosnap-node" --fail-under-lines 70
 ```
 
+### Node Package
+
+```bash
+npm install cryosnap
+```
+
 ### Release Flow
 
 ```bash
 cargo release patch --workspace --dry-run
 cargo release patch --workspace --execute
+```
+
+Publish to crates.io:
+
+```bash
+cargo publish -p cryosnap-core
+cargo publish -p cryosnap
+```
+
+Publish to npm:
+
+```bash
+cd crates/cryosnap-node
+npm publish
 ```
 
 ### License
