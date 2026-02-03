@@ -1,6 +1,7 @@
 use base64::Engine;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::env;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
@@ -27,6 +28,44 @@ const DEFAULT_PNG_QUANTIZE_DITHER: f32 = 1.0;
 const DEFAULT_TITLE_SIZE: f32 = 12.0;
 const DEFAULT_TITLE_OPACITY: f32 = 0.85;
 const DEFAULT_TITLE_MAX_WIDTH: usize = 80;
+const AUTO_FALLBACK_NF: &[&str] = &["Symbols Nerd Font Mono"];
+const AUTO_FALLBACK_CJK: &[&str] = &[
+    "Noto Sans Mono CJK SC",
+    "Noto Sans Mono CJK TC",
+    "Noto Sans Mono CJK JP",
+    "Noto Sans Mono CJK KR",
+    "Noto Sans CJK SC",
+    "Noto Sans CJK TC",
+    "Noto Sans CJK JP",
+    "Noto Sans CJK KR",
+    "Source Han Sans SC",
+    "Source Han Sans TC",
+    "Source Han Sans JP",
+    "Source Han Sans KR",
+    "PingFang SC",
+    "PingFang TC",
+    "Hiragino Sans GB",
+    "Hiragino Sans",
+    "Apple SD Gothic Neo",
+    "Microsoft YaHei",
+    "SimSun",
+    "MS Gothic",
+    "Meiryo",
+    "Malgun Gothic",
+    "WenQuanYi Micro Hei",
+    "WenQuanYi Zen Hei",
+];
+const AUTO_FALLBACK_GLOBAL: &[&str] = &[
+    "Noto Sans",
+    "Noto Sans Mono",
+    "Segoe UI",
+    "Arial Unicode MS",
+];
+const AUTO_FALLBACK_EMOJI: &[&str] = &[
+    "Apple Color Emoji",
+    "Segoe UI Emoji",
+    "Noto Color Emoji",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -127,6 +166,9 @@ pub struct Font {
     pub file: Option<String>,
     pub size: f32,
     pub ligatures: bool,
+    pub fallbacks: Vec<String>,
+    #[serde(rename = "system_fallback")]
+    pub system_fallback: FontSystemFallback,
 }
 
 impl Default for Font {
@@ -136,8 +178,19 @@ impl Default for Font {
             file: None,
             size: 14.0,
             ligatures: true,
+            fallbacks: Vec::new(),
+            system_fallback: FontSystemFallback::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FontSystemFallback {
+    #[default]
+    Auto,
+    Always,
+    Never,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,6 +372,15 @@ pub fn render(request: &RenderRequest) -> Result<RenderResult> {
 }
 
 pub fn render_svg(input: &InputSource, config: &Config) -> Result<Vec<u8>> {
+    Ok(render_svg_with_plan(input, config)?.bytes)
+}
+
+struct RenderedSvg {
+    bytes: Vec<u8>,
+    font_plan: FontPlan,
+}
+
+fn render_svg_with_plan(input: &InputSource, config: &Config) -> Result<RenderedSvg> {
     let loaded = load_input(input, Duration::from_millis(config.execute_timeout_ms))?;
     let is_ansi = is_ansi_input(&loaded, config);
     let line_window = &config.lines;
@@ -346,8 +408,9 @@ pub fn render_svg(input: &InputSource, config: &Config) -> Result<Vec<u8>> {
         (lines, default_fg, cut.start)
     };
 
-    let font_css = svg_font_face_css(config)?;
     let title_text = resolve_title_text(input, config);
+    let font_plan = build_font_plan(config, &lines, title_text.as_deref());
+    let font_css = svg_font_face_css(config, &font_plan)?;
     let svg = build_svg(
         &lines,
         config,
@@ -355,21 +418,54 @@ pub fn render_svg(input: &InputSource, config: &Config) -> Result<Vec<u8>> {
         font_css,
         line_offset,
         title_text.as_deref(),
+        &font_plan.font_family,
     );
-    Ok(svg.into_bytes())
+    Ok(RenderedSvg {
+        bytes: svg.into_bytes(),
+        font_plan,
+    })
 }
 
 pub fn render_png(input: &InputSource, config: &Config) -> Result<Vec<u8>> {
-    let svg = render_svg(input, config)?;
-    render_png_from_svg(&svg, config)
+    let rendered = render_svg_with_plan(input, config)?;
+    render_png_from_svg_with_plan(
+        &rendered.bytes,
+        config,
+        rendered.font_plan.needs_system_fonts,
+        rendered.font_plan.needs_jetbrains_font,
+        rendered.font_plan.needs_symbols_font,
+    )
 }
 
 pub fn render_webp(input: &InputSource, config: &Config) -> Result<Vec<u8>> {
-    let svg = render_svg(input, config)?;
-    render_webp_from_svg(&svg, config)
+    let rendered = render_svg_with_plan(input, config)?;
+    render_webp_from_svg_with_plan(
+        &rendered.bytes,
+        config,
+        rendered.font_plan.needs_system_fonts,
+        rendered.font_plan.needs_jetbrains_font,
+        rendered.font_plan.needs_symbols_font,
+    )
 }
 
 pub fn render_png_from_svg(svg: &[u8], config: &Config) -> Result<Vec<u8>> {
+    let needs = font_needs_from_svg(svg, config);
+    render_png_from_svg_with_plan(
+        svg,
+        config,
+        needs.needs_system_fonts,
+        needs.needs_jetbrains_font,
+        needs.needs_symbols_font,
+    )
+}
+
+fn render_png_from_svg_with_plan(
+    svg: &[u8],
+    config: &Config,
+    needs_system_fonts: bool,
+    needs_jetbrains_font: bool,
+    needs_symbols_font: bool,
+) -> Result<Vec<u8>> {
     if let Some(png) = try_render_png_with_rsvg(svg, config)? {
         let png = if config.png.quantize {
             quantize_png_bytes(&png, &config.png)?
@@ -379,7 +475,13 @@ pub fn render_png_from_svg(svg: &[u8], config: &Config) -> Result<Vec<u8>> {
         return optimize_png(png, &config.png);
     }
 
-    let pixmap = rasterize_svg(svg, config)?;
+    let pixmap = rasterize_svg(
+        svg,
+        config,
+        needs_system_fonts,
+        needs_jetbrains_font,
+        needs_symbols_font,
+    )?;
     let png = if config.png.quantize {
         quantize_pixmap_to_png(&pixmap, &config.png)?
     } else {
@@ -391,13 +493,90 @@ pub fn render_png_from_svg(svg: &[u8], config: &Config) -> Result<Vec<u8>> {
 }
 
 pub fn render_webp_from_svg(svg: &[u8], config: &Config) -> Result<Vec<u8>> {
+    let needs = font_needs_from_svg(svg, config);
+    render_webp_from_svg_with_plan(
+        svg,
+        config,
+        needs.needs_system_fonts,
+        needs.needs_jetbrains_font,
+        needs.needs_symbols_font,
+    )
+}
+
+fn render_webp_from_svg_with_plan(
+    svg: &[u8],
+    config: &Config,
+    needs_system_fonts: bool,
+    needs_jetbrains_font: bool,
+    needs_symbols_font: bool,
+) -> Result<Vec<u8>> {
     if matches!(config.raster.backend, RasterBackend::Rsvg) {
         return Err(Error::Render(
             "rsvg backend does not support webp output".to_string(),
         ));
     }
-    let pixmap = rasterize_svg(svg, config)?;
+    let pixmap = rasterize_svg(
+        svg,
+        config,
+        needs_system_fonts,
+        needs_jetbrains_font,
+        needs_symbols_font,
+    )?;
     pixmap_to_webp(&pixmap)
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct SvgFontNeeds {
+    needs_system_fonts: bool,
+    needs_jetbrains_font: bool,
+    needs_symbols_font: bool,
+}
+
+fn font_needs_from_svg(svg: &[u8], config: &Config) -> SvgFontNeeds {
+    let needs_primary_system_font =
+        config.font.file.is_none() && !is_jetbrains_mono(&config.font.family);
+    let fallbacks_need_system = fallbacks_require_system_fonts(&config.font.fallbacks);
+
+    let mut needs = FontFallbackNeeds::default();
+    let mut has_symbols_family = false;
+    let mut has_jetbrains_family = is_jetbrains_mono(&config.font.family);
+    let svg_text = std::str::from_utf8(svg).ok();
+    if let Some(text) = svg_text {
+        scan_text_fallbacks(text, &mut needs);
+        has_symbols_family = text
+            .to_ascii_lowercase()
+            .contains("symbols nerd font mono");
+        if !has_jetbrains_family {
+            has_jetbrains_family = text.to_ascii_lowercase().contains("jetbrains mono");
+        }
+    }
+
+    let needs_system_fonts = if needs_primary_system_font {
+        true
+    } else {
+        match config.font.system_fallback {
+            FontSystemFallback::Never => false,
+            FontSystemFallback::Always => true,
+            FontSystemFallback::Auto => {
+                if fallbacks_need_system {
+                    true
+                } else if svg_text.is_none() {
+                    true
+                } else {
+                    needs.needs_unicode
+                }
+            }
+        }
+    };
+
+    let needs_symbols_font =
+        has_symbols_family || needs.needs_nf || is_symbols_nerd_font_mono(&config.font.family);
+
+    SvgFontNeeds {
+        needs_system_fonts,
+        needs_jetbrains_font: has_jetbrains_family,
+        needs_symbols_font,
+    }
 }
 
 fn try_render_png_with_rsvg(svg: &[u8], config: &Config) -> Result<Option<Vec<u8>>> {
@@ -495,9 +674,20 @@ fn svg_dimensions(svg: &[u8]) -> Result<(u32, u32)> {
     Ok((size.width(), size.height()))
 }
 
-fn rasterize_svg(svg: &[u8], config: &Config) -> Result<tiny_skia::Pixmap> {
+fn rasterize_svg(
+    svg: &[u8],
+    config: &Config,
+    needs_system_fonts: bool,
+    needs_jetbrains_font: bool,
+    needs_symbols_font: bool,
+) -> Result<tiny_skia::Pixmap> {
     let mut opt = usvg::Options::default();
-    let fontdb = build_fontdb(config)?;
+    let fontdb = build_fontdb(
+        config,
+        needs_system_fonts,
+        needs_jetbrains_font,
+        needs_symbols_font,
+    )?;
     *opt.fontdb_mut() = fontdb;
 
     let tree = usvg::Tree::from_data(svg, &opt)
@@ -644,20 +834,148 @@ fn truncate_to_cells(text: &str, max_cells: usize, ellipsis: &str) -> String {
     out
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct FontFallbackNeeds {
+    needs_unicode: bool,
+    needs_nf: bool,
+}
+
+#[derive(Debug, Clone)]
+struct FontPlan {
+    font_family: String,
+    needs_system_fonts: bool,
+    needs_jetbrains_font: bool,
+    needs_symbols_font: bool,
+}
+
+fn is_private_use(ch: char) -> bool {
+    let cp = ch as u32;
+    (0xE000..=0xF8FF).contains(&cp)
+        || (0xF0000..=0xFFFFD).contains(&cp)
+        || (0x100000..=0x10FFFD).contains(&cp)
+}
+
+fn scan_text_fallbacks(text: &str, needs: &mut FontFallbackNeeds) {
+    for ch in text.chars() {
+        if ch > '\u{7f}' {
+            needs.needs_unicode = true;
+        }
+        if is_private_use(ch) {
+            needs.needs_nf = true;
+        }
+        if needs.needs_unicode && needs.needs_nf {
+            break;
+        }
+    }
+}
+
+fn collect_font_fallback_needs(lines: &[Line], title_text: Option<&str>) -> FontFallbackNeeds {
+    let mut needs = FontFallbackNeeds::default();
+    for line in lines {
+        for span in &line.spans {
+            scan_text_fallbacks(&span.text, &mut needs);
+            if needs.needs_unicode && needs.needs_nf {
+                break;
+            }
+        }
+        if needs.needs_unicode && needs.needs_nf {
+            break;
+        }
+    }
+    if let Some(title) = title_text {
+        scan_text_fallbacks(title, &mut needs);
+    }
+    needs
+}
+
+fn push_family(out: &mut Vec<String>, seen: &mut HashSet<String>, name: &str) {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let key = trimmed.to_ascii_lowercase();
+    if seen.insert(key) {
+        out.push(trimmed.to_string());
+    }
+}
+
+fn build_font_plan(config: &Config, lines: &[Line], title_text: Option<&str>) -> FontPlan {
+    let needs = collect_font_fallback_needs(lines, title_text);
+    let needs_primary_system_font =
+        config.font.file.is_none() && !is_jetbrains_mono(&config.font.family);
+    let fallbacks_need_system = fallbacks_require_system_fonts(&config.font.fallbacks);
+    let add_unicode = match config.font.system_fallback {
+        FontSystemFallback::Never => false,
+        FontSystemFallback::Always => true,
+        FontSystemFallback::Auto => needs.needs_unicode,
+    };
+    let add_nf = needs.needs_nf;
+    let needs_system_fonts = needs_primary_system_font
+        || match config.font.system_fallback {
+            FontSystemFallback::Never => false,
+            FontSystemFallback::Always => true,
+            FontSystemFallback::Auto => needs.needs_unicode || fallbacks_need_system,
+        };
+
+    let mut families = Vec::new();
+    let mut seen = HashSet::new();
+    push_family(&mut families, &mut seen, &config.font.family);
+    for name in &config.font.fallbacks {
+        push_family(&mut families, &mut seen, name);
+    }
+
+    if add_nf {
+        for name in AUTO_FALLBACK_NF {
+            push_family(&mut families, &mut seen, name);
+        }
+    }
+    if add_unicode {
+        for name in AUTO_FALLBACK_CJK {
+            push_family(&mut families, &mut seen, name);
+        }
+        for name in AUTO_FALLBACK_GLOBAL {
+            push_family(&mut families, &mut seen, name);
+        }
+        for name in AUTO_FALLBACK_EMOJI {
+            push_family(&mut families, &mut seen, name);
+        }
+    }
+
+    let font_family = families.join(", ");
+    let needs_jetbrains_font = families.iter().any(|name| is_jetbrains_mono(name));
+    FontPlan {
+        font_family,
+        needs_system_fonts,
+        needs_jetbrains_font,
+        needs_symbols_font: families
+            .iter()
+            .any(|name| is_symbols_nerd_font_mono(name)),
+    }
+}
+
 fn is_jetbrains_mono(family: &str) -> bool {
     family.eq_ignore_ascii_case("JetBrains Mono")
 }
 
-fn is_hack_nerd_font(family: &str) -> bool {
-    family.eq_ignore_ascii_case("Hack Nerd Font")
-        || family.eq_ignore_ascii_case("Hack Nerd Font Mono")
+fn is_symbols_nerd_font_mono(family: &str) -> bool {
+    family.eq_ignore_ascii_case("Symbols Nerd Font Mono")
 }
 
-fn build_fontdb(config: &Config) -> Result<usvg::fontdb::Database> {
+fn is_builtin_font(family: &str) -> bool {
+    is_jetbrains_mono(family) || is_symbols_nerd_font_mono(family)
+}
+
+fn fallbacks_require_system_fonts(fallbacks: &[String]) -> bool {
+    fallbacks.iter().any(|name| !is_builtin_font(name))
+}
+
+fn build_fontdb(
+    config: &Config,
+    needs_system_fonts: bool,
+    needs_jetbrains_font: bool,
+    needs_symbols_font: bool,
+) -> Result<usvg::fontdb::Database> {
     let mut fontdb = usvg::fontdb::Database::new();
-    let needs_system_fonts = config.font.file.is_none()
-        && !is_jetbrains_mono(&config.font.family)
-        && !is_hack_nerd_font(&config.font.family);
     if needs_system_fonts {
         fontdb.load_system_fonts();
     }
@@ -670,8 +988,22 @@ fn build_fontdb(config: &Config) -> Result<usvg::fontdb::Database> {
         } else {
             fontdb.load_font_data(JETBRAINS_MONO_NL.to_vec());
         }
-    } else if is_hack_nerd_font(&config.font.family) {
-        fontdb.load_font_data(HACK_NERD_FONT_REGULAR.to_vec());
+    }
+    let using_custom_jetbrains =
+        config.font.file.is_some() && is_jetbrains_mono(&config.font.family);
+    if needs_jetbrains_font && !using_custom_jetbrains && !is_jetbrains_mono(&config.font.family)
+    {
+        let bytes = if config.font.ligatures {
+            JETBRAINS_MONO_REGULAR.to_vec()
+        } else {
+            JETBRAINS_MONO_NL.to_vec()
+        };
+        fontdb.load_font_data(bytes);
+    }
+    let using_custom_symbols =
+        config.font.file.is_some() && is_symbols_nerd_font_mono(&config.font.family);
+    if needs_symbols_font && !using_custom_symbols {
+        fontdb.load_font_data(SYMBOLS_NERD_FONT_MONO_REGULAR.to_vec());
     }
     Ok(fontdb)
 }
@@ -1796,6 +2128,7 @@ fn build_svg(
     font_css: Option<String>,
     line_offset: usize,
     title_text: Option<&str>,
+    font_family: &str,
 ) -> String {
     let padding = expand_box(&config.padding);
     let margin = expand_box(&config.margin);
@@ -1987,7 +2320,7 @@ fn build_svg(
                             title_x,
                             title_y,
                             escape_attr(&config.title.color),
-                            escape_attr(&config.font.family),
+                            escape_attr(font_family),
                             title_size,
                             anchor,
                             opacity_attr,
@@ -2001,7 +2334,7 @@ fn build_svg(
 
     svg.push_str(&format!(
         r#"<g font-family="{}" font-size="{:.2}px" clip-path="url(#contentClip)">"#,
-        escape_attr(&config.font.family),
+        escape_attr(font_family),
         config.font.size
     ));
     let mut bg_layer = String::new();
@@ -2141,8 +2474,21 @@ fn escape_attr(text: &str) -> String {
     escape_text(text).replace('"', "&quot;")
 }
 
-fn svg_font_face_css(config: &Config) -> Result<Option<String>> {
-    let (data, format, mime) = if let Some(font_file) = &config.font.file {
+fn svg_font_face_css(config: &Config, font_plan: &FontPlan) -> Result<Option<String>> {
+    let mut rules = Vec::new();
+    let mut push_rule = |family: &str, data: Vec<u8>, format: &str, mime: &str| {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(data);
+        rules.push(format!(
+            "@font-face {{ font-family: '{}'; src: url(data:{};base64,{}) format('{}'); }}",
+            escape_attr(family),
+            mime,
+            encoded,
+            format
+        ));
+    };
+    let mut added_jetbrains = false;
+
+    if let Some(font_file) = &config.font.file {
         let bytes = std::fs::read(font_file)?;
         let ext = Path::new(font_file)
             .extension()
@@ -2155,44 +2501,60 @@ fn svg_font_face_css(config: &Config) -> Result<Option<String>> {
             "woff" => ("woff", "font/woff"),
             _ => ("truetype", "font/ttf"),
         };
-        (bytes, format.to_string(), mime.to_string())
+        push_rule(&config.font.family, bytes, format, mime);
+        if is_jetbrains_mono(&config.font.family) {
+            added_jetbrains = true;
+        }
     } else if is_jetbrains_mono(&config.font.family) {
         if config.font.ligatures {
-            (
+            push_rule(
+                &config.font.family,
                 JETBRAINS_MONO_REGULAR.to_vec(),
-                "truetype".to_string(),
-                "font/ttf".to_string(),
-            )
+                "truetype",
+                "font/ttf",
+            );
         } else {
-            (
+            push_rule(
+                &config.font.family,
                 JETBRAINS_MONO_NL.to_vec(),
-                "truetype".to_string(),
-                "font/ttf".to_string(),
-            )
+                "truetype",
+                "font/ttf",
+            );
         }
-    } else if is_hack_nerd_font(&config.font.family) {
-        (
-            HACK_NERD_FONT_REGULAR.to_vec(),
-            "truetype".to_string(),
-            "font/ttf".to_string(),
-        )
-    } else {
-        return Ok(None);
-    };
+        added_jetbrains = true;
+    }
 
-    let encoded = base64::engine::general_purpose::STANDARD.encode(data);
-    Ok(Some(format!(
-        "@font-face {{ font-family: '{}'; src: url(data:{};base64,{}) format('{}'); }}",
-        escape_attr(&config.font.family),
-        mime,
-        encoded,
-        format
-    )))
+    if font_plan.needs_jetbrains_font && !added_jetbrains {
+        let bytes = if config.font.ligatures {
+            JETBRAINS_MONO_REGULAR.to_vec()
+        } else {
+            JETBRAINS_MONO_NL.to_vec()
+        };
+        push_rule("JetBrains Mono", bytes, "truetype", "font/ttf");
+    }
+
+    let using_custom_symbols =
+        config.font.file.is_some() && is_symbols_nerd_font_mono(&config.font.family);
+    if font_plan.needs_symbols_font && !using_custom_symbols {
+        push_rule(
+            "Symbols Nerd Font Mono",
+            SYMBOLS_NERD_FONT_MONO_REGULAR.to_vec(),
+            "truetype",
+            "font/ttf",
+        );
+    }
+
+    if rules.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(rules.join("")))
+    }
 }
 
 static JETBRAINS_MONO_REGULAR: &[u8] = include_bytes!("../assets/JetBrainsMono-Regular.ttf");
 static JETBRAINS_MONO_NL: &[u8] = include_bytes!("../assets/JetBrainsMonoNL-Regular.ttf");
-static HACK_NERD_FONT_REGULAR: &[u8] = include_bytes!("../assets/HackNerdFont-Regular.ttf");
+static SYMBOLS_NERD_FONT_MONO_REGULAR: &[u8] =
+    include_bytes!("../assets/SymbolsNerdFontMono-Regular.ttf");
 
 #[cfg(test)]
 mod tests {
@@ -2275,7 +2637,7 @@ mod tests {
         cfg.shadow.blur = 6.0;
         cfg.window_controls = true;
         cfg.show_line_numbers = true;
-        let svg = build_svg(&[line], &cfg, "#FFFFFF", None, 0, None);
+        let svg = build_svg(&[line], &cfg, "#FFFFFF", None, 0, None, &cfg.font.family);
         assert!(svg.contains("filter id=\"shadow\""));
         assert!(svg.contains("clipPath"));
         assert!(svg.contains("font-family=\"Test\""));
@@ -2300,20 +2662,14 @@ mod tests {
     fn svg_font_face_css_respects_family() {
         let mut cfg = Config::default();
         cfg.font.family = "JetBrains Mono".to_string();
-        let css = svg_font_face_css(&cfg).expect("css");
+        let plan = build_font_plan(&cfg, &[Line::default()], None);
+        let css = svg_font_face_css(&cfg, &plan).expect("css");
         assert!(css.is_some());
 
         cfg.font.family = "Custom".to_string();
-        let css = svg_font_face_css(&cfg).expect("css");
+        let plan = build_font_plan(&cfg, &[Line::default()], None);
+        let css = svg_font_face_css(&cfg, &plan).expect("css");
         assert!(css.is_none());
-    }
-
-    #[test]
-    fn svg_font_face_css_supports_hack_nerd_font() {
-        let mut cfg = Config::default();
-        cfg.font.family = "Hack Nerd Font".to_string();
-        let css = svg_font_face_css(&cfg).expect("css");
-        assert!(css.is_some());
     }
 
     #[test]
@@ -2572,9 +2928,9 @@ mod tests {
     }
 
     #[test]
-    fn render_svg_supports_nerd_font_glyph() {
+    fn render_svg_includes_nf_fallback_when_needed() {
         let mut cfg = Config::default();
-        cfg.font.family = "Hack Nerd Font".to_string();
+        cfg.font.family = "JetBrains Mono".to_string();
         let request = RenderRequest {
             input: InputSource::Text("\u{f121}".to_string()),
             config: cfg,
@@ -2582,7 +2938,7 @@ mod tests {
         };
         let result = render(&request).expect("render svg");
         let svg = String::from_utf8(result.bytes).expect("utf8");
-        assert!(svg.contains('\u{f121}'));
+        assert!(svg.contains("Symbols Nerd Font Mono"));
     }
 
     #[test]

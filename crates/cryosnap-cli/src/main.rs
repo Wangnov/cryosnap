@@ -1,7 +1,7 @@
 use clap::{CommandFactory, Parser, ValueEnum};
 use cryosnap_core::{
-    Config, InputSource, OutputFormat, PngQuantPreset, PngStrip, RasterBackend, RenderRequest,
-    TitleAlign, TitlePathStyle,
+    Config, FontSystemFallback, InputSource, OutputFormat, PngQuantPreset, PngStrip, RasterBackend,
+    RenderRequest, TitleAlign, TitlePathStyle,
 };
 use dialoguer::{Confirm, Input, Select};
 use directories::ProjectDirs;
@@ -120,6 +120,14 @@ struct Args {
     /// Font file path.
     #[arg(long = "font.file")]
     font_file: Option<String>,
+
+    /// Font fallback families (comma-separated).
+    #[arg(long = "font.fallbacks", value_name = "LIST")]
+    font_fallbacks: Option<String>,
+
+    /// System font fallback mode (auto, always, never).
+    #[arg(long = "font.system-fallback", value_enum, alias = "font.system_fallback")]
+    font_system_fallback: Option<FontSystemFallbackArg>,
 
     /// Font size.
     #[arg(long = "font.size")]
@@ -276,6 +284,13 @@ enum RasterBackendArg {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
+enum FontSystemFallbackArg {
+    Auto,
+    Always,
+    Never,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
 enum PngQuantPresetArg {
     Fast,
     Balanced,
@@ -298,6 +313,16 @@ impl From<RasterBackendArg> for RasterBackend {
             RasterBackendArg::Auto => RasterBackend::Auto,
             RasterBackendArg::Resvg => RasterBackend::Resvg,
             RasterBackendArg::Rsvg => RasterBackend::Rsvg,
+        }
+    }
+}
+
+impl From<FontSystemFallbackArg> for FontSystemFallback {
+    fn from(value: FontSystemFallbackArg) -> Self {
+        match value {
+            FontSystemFallbackArg::Auto => FontSystemFallback::Auto,
+            FontSystemFallbackArg::Always => FontSystemFallback::Always,
+            FontSystemFallbackArg::Never => FontSystemFallback::Never,
         }
     }
 }
@@ -428,6 +453,9 @@ fn run_with(
     if let Some(file) = args.font_file {
         config.font.file = Some(file);
     }
+    if let Some(fallbacks) = args.font_fallbacks {
+        config.font.fallbacks = parse_font_fallbacks(&fallbacks)?;
+    }
     if let Some(size) = args.font_size {
         config.font.size = size;
     }
@@ -445,6 +473,9 @@ fn run_with(
     }
     if let Some(ligatures) = args.font_ligatures {
         config.font.ligatures = ligatures;
+    }
+    if let Some(mode) = args.font_system_fallback {
+        config.font.system_fallback = mode.into();
     }
     if let Some(timeout) = args.execute_timeout {
         config.execute_timeout_ms = parse_timeout_ms(&timeout)?;
@@ -827,6 +858,30 @@ fn run_interactive_with(
     config.shadow.y = prompter.input_f32("Shadow offset Y", config.shadow.y)?;
 
     config.font.family = prompter.input_string("Font family", Some(&config.font.family), false)?;
+    let fallbacks_default = if config.font.fallbacks.is_empty() {
+        String::new()
+    } else {
+        config.font.fallbacks.join(", ")
+    };
+    let fallbacks = prompter.input_string(
+        "Font fallbacks (comma-separated)",
+        Some(&fallbacks_default),
+        true,
+    )?;
+    config.font.fallbacks = parse_font_fallbacks(&fallbacks)?;
+    let fallback_items = ["auto", "always", "never"];
+    let fallback_default = match config.font.system_fallback {
+        FontSystemFallback::Auto => 0,
+        FontSystemFallback::Always => 1,
+        FontSystemFallback::Never => 2,
+    };
+    let fallback_choice =
+        prompter.select("System font fallback", &fallback_items, fallback_default)?;
+    config.font.system_fallback = match fallback_choice {
+        1 => FontSystemFallback::Always,
+        2 => FontSystemFallback::Never,
+        _ => FontSystemFallback::Auto,
+    };
     config.font.size = prompter.input_f32("Font size", config.font.size)?;
     config.font.ligatures = prompter.confirm("Enable ligatures?", config.font.ligatures)?;
     config.line_height = prompter.input_f32("Line height", config.line_height)?;
@@ -996,6 +1051,20 @@ fn parse_lines(input: &str) -> Result<Vec<i32>, Box<dyn std::error::Error>> {
         1 | 2 => Ok(out),
         _ => Err(format!("expected 1 or 2 values, got {}", out.len()).into()),
     }
+}
+
+fn parse_font_fallbacks(input: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let parts = trimmed
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+    Ok(parts)
 }
 
 fn parse_timeout_ms(input: &str) -> Result<u64, Box<dyn std::error::Error>> {
@@ -1206,6 +1275,7 @@ mod tests {
     fn run_interactive_updates_config() {
         let prompter = FakePrompter::new();
         prompter.selects.borrow_mut().push_back(0);
+        prompter.selects.borrow_mut().push_back(0);
         prompter
             .strings
             .borrow_mut()
@@ -1222,6 +1292,10 @@ mod tests {
             .borrow_mut()
             .push_back("#333333".to_string());
         prompter.strings.borrow_mut().push_back("Test".to_string());
+        prompter
+            .strings
+            .borrow_mut()
+            .push_back("Symbols Nerd Font Mono, Noto Sans CJK SC".to_string());
         prompter.floats.borrow_mut().push_back(4.0);
         prompter.floats.borrow_mut().push_back(1.0);
         prompter.floats.borrow_mut().push_back(6.0);
@@ -1248,6 +1322,11 @@ mod tests {
         assert_eq!(cfg.border.color, "#333333");
         assert_eq!(cfg.shadow.blur, 6.0);
         assert_eq!(cfg.font.family, "Test");
+        assert_eq!(
+            cfg.font.fallbacks,
+            vec!["Symbols Nerd Font Mono", "Noto Sans CJK SC"]
+        );
+        assert!(matches!(cfg.font.system_fallback, FontSystemFallback::Auto));
         assert_eq!(cfg.font.size, 14.0);
         assert_eq!(cfg.line_height, 1.3);
         assert!(!cfg.font.ligatures);
@@ -1478,6 +1557,7 @@ mod tests {
     fn interactive_command_branch() {
         let prompter = FakePrompter::new();
         prompter.selects.borrow_mut().push_back(1);
+        prompter.selects.borrow_mut().push_back(0);
         prompter
             .strings
             .borrow_mut()
@@ -1494,6 +1574,10 @@ mod tests {
             .borrow_mut()
             .push_back("#333333".to_string());
         prompter.strings.borrow_mut().push_back("Test".to_string());
+        prompter
+            .strings
+            .borrow_mut()
+            .push_back("Symbols Nerd Font Mono".to_string());
         prompter.floats.borrow_mut().push_back(4.0);
         prompter.floats.borrow_mut().push_back(1.0);
         prompter.floats.borrow_mut().push_back(6.0);

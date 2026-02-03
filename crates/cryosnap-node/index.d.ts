@@ -19,6 +19,9 @@ export interface FontConfig {
   filePath?: string;
   size?: number;
   ligatures?: boolean;
+  fallbacks?: string[];
+  system_fallback?: 'auto' | 'always' | 'never';
+  systemFallback?: 'auto' | 'always' | 'never';
 }
 
 export interface PngConfig {

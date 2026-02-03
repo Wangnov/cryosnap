@@ -22,7 +22,9 @@
   "font": {
     "family": "JetBrains Mono",
     "size": 14,
-    "ligatures": true
+    "ligatures": true,
+    "fallbacks": [],
+    "system_fallback": "auto"
   },
   "line_height": 1.2,
   "raster": {

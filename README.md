@@ -27,7 +27,7 @@
 - 交互式配置（`--interactive`）
 - 配置文件：`default / base / full / user / 自定义路径`
 - 字体嵌入（TTF/WOFF/WOFF2）
-- Nerd Font（内置 Hack Nerd Font）
+- Nerd Font 符号回退（内置 Symbols Nerd Font Mono，可配置）
 - 标题栏（自动文件路径 / tmux 信息）
 - 栅格化后端：纯 Rust / rsvg-convert（自动检测）
 - 细节配置：padding/margin/border/shadow/line-height/lines/wrap/line-numbers
@@ -140,10 +140,17 @@ cryosnap main.rs -o out.png --raster.backend resvg
 
 ### 字体与 Nerd Font
 
-内置 `Hack Nerd Font`，可直接通过 `font.family` 使用：
+默认字体为 JetBrains Mono。Nerd Font 符号内置 Symbols Nerd Font Mono；
+多语言仍依赖系统字体回退（不内置 CJK）。可用 `font.fallbacks` 指定回退链，
+`font.system-fallback` 控制系统字体加载（auto/always/never）：
 
 ```bash
-cryosnap main.rs -o out.png --font.family "Hack Nerd Font"
+# Nerd Font 符号回退（内置 Symbols Nerd Font Mono）
+cryosnap main.rs -o out.png --font.fallbacks "Symbols Nerd Font Mono"
+
+# Nerd Font + 中文回退
+cryosnap main.rs -o out.png --font.fallbacks "Symbols Nerd Font Mono, Noto Sans CJK SC" \
+  --font.system-fallback auto
 ```
 
 ### 标题栏
@@ -275,7 +282,7 @@ MIT，详见 `LICENSE`。
 ### 第三方许可证
 
 - JetBrains Mono 字体：SIL Open Font License 1.1（见 `assets/JetBrainsMono-OFL-1.1.txt`）
-- Hack Nerd Font：见 `assets/HackNerdFont-LICENSE.md`
+- Symbols Nerd Font Mono：MIT（见 `assets/SymbolsNerdFont-LICENSE.txt`）
 
 ---
 
@@ -292,7 +299,7 @@ MIT，详见 `LICENSE`。
 - Interactive config (`--interactive`)
 - Config files: `default / base / full / user / custom`
 - Font embedding (TTF/WOFF/WOFF2)
-- Nerd Font (built-in Hack Nerd Font)
+- Nerd Font symbol fallback (built-in Symbols Nerd Font Mono, configurable)
 - Title bar (auto file path / tmux metadata)
 - Raster backends: pure Rust / rsvg-convert (auto-detect)
 - Detailed styling: padding/margin/border/shadow/line-height/lines/wrap/line-numbers
@@ -397,10 +404,17 @@ cryosnap main.rs -o out.png --raster.backend resvg
 
 ### Fonts & Nerd Font
 
-Built-in `Hack Nerd Font` can be used via `font.family`:
+Default font is JetBrains Mono. Nerd Font symbols are built in via Symbols Nerd Font Mono;
+multi-language still relies on system font fallback (no embedded CJK). Use `font.fallbacks`
+and `font.system-fallback` (auto/always/never):
 
 ```bash
-cryosnap main.rs -o out.png --font.family "Hack Nerd Font"
+# Nerd Font symbols only (built-in Symbols Nerd Font Mono)
+cryosnap main.rs -o out.png --font.fallbacks "Symbols Nerd Font Mono"
+
+# Nerd Font + CJK fallback
+cryosnap main.rs -o out.png --font.fallbacks "Symbols Nerd Font Mono, Noto Sans CJK SC" \
+  --font.system-fallback auto
 ```
 
 ### Title Bar
@@ -529,4 +543,4 @@ MIT, see `LICENSE`.
 ### Third-party Licenses
 
 - JetBrains Mono font: SIL Open Font License 1.1 (see `assets/JetBrainsMono-OFL-1.1.txt`)
-- Hack Nerd Font: see `assets/HackNerdFont-LICENSE.md`
+- Symbols Nerd Font Mono: MIT (see `assets/SymbolsNerdFont-LICENSE.txt`)

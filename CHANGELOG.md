@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 - PNG lossless optimization via oxipng with configurable level/strip.
 - Optional PNG quantization via libimagequant (preset + quality/speed/dither controls).
-- Built-in Hack Nerd Font support for Nerd Font glyphs.
+- Configurable system font fallback (`font.fallbacks`, `font.system-fallback`) with auto detection.
+- Built-in Symbols Nerd Font Mono (symbols-only) for Nerd Font glyphs.
+- Removed bundled Hack Nerd Font asset.
 - Title bar text with automatic file/tmux metadata.
 - Adaptive raster scaling with max-pixel cap for performance.
 - Optional rsvg-convert raster backend with auto detection.

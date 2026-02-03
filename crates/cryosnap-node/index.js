@@ -23,6 +23,9 @@ function normalizeConfig(config) {
     if (font.filePath !== undefined && font.file === undefined) {
       font.file = font.filePath;
     }
+    if (font.systemFallback !== undefined && font.system_fallback === undefined) {
+      font.system_fallback = font.systemFallback;
+    }
     out.font = font;
   }
 
