@@ -148,7 +148,7 @@ fn build_svg_renders_title_and_styles() {
     cfg.title.ellipsis = "..".to_string();
 
     let svg_center = build_svg(
-        &[line.clone()],
+        std::slice::from_ref(&line),
         &cfg,
         "#FFFFFF",
         Some("/*css*/".to_string()),
@@ -168,7 +168,7 @@ fn build_svg_renders_title_and_styles() {
     cfg_right.title.align = TitleAlign::Right;
     cfg_right.title.opacity = 1.0;
     let svg_right = build_svg(
-        &[line.clone()],
+        std::slice::from_ref(&line),
         &cfg_right,
         "#FFFFFF",
         None,
@@ -182,7 +182,7 @@ fn build_svg_renders_title_and_styles() {
     cfg_left.title.text = Some("Left Title".to_string());
     cfg_left.title.align = TitleAlign::Left;
     let svg_left = build_svg(
-        &[line],
+        std::slice::from_ref(&line),
         &cfg_left,
         "#FFFFFF",
         None,
@@ -809,8 +809,10 @@ fn script_repo_key_skips_common_and_cjk() {
 fn collect_cjk_regions_includes_scripts_and_config() {
     let mut cfg = Config::default();
     cfg.font.cjk_region = CjkRegion::Hk;
-    let mut needs = FontFallbackNeeds::default();
-    needs.needs_cjk = true;
+    let mut needs = FontFallbackNeeds {
+        needs_cjk: true,
+        ..Default::default()
+    };
     needs.scripts.insert(Script::Hiragana);
     needs.scripts.insert(Script::Hangul);
     needs.scripts.insert(Script::Bopomofo);
@@ -1226,9 +1228,11 @@ fn optimize_png_handles_strip_options() {
         writer.write_image_data(&rgba).expect("write");
     }
     for strip in [PngStrip::None, PngStrip::Safe, PngStrip::All] {
-        let mut cfg = PngOptions::default();
-        cfg.optimize = true;
-        cfg.strip = strip;
+        let cfg = PngOptions {
+            optimize: true,
+            strip,
+            ..Default::default()
+        };
         let out = optimize_png(bytes.clone(), &cfg).expect("optimize");
         assert!(out.starts_with(b"\x89PNG"));
     }
@@ -1375,8 +1379,10 @@ fn resolve_script_font_plan_files_repo() {
     let state = Arc::new(NotofontsState(repos));
     let prev = set_notofonts_state(Some(state));
 
-    let mut needs = FontFallbackNeeds::default();
-    needs.needs_unicode = true;
+    let mut needs = FontFallbackNeeds {
+        needs_unicode: true,
+        ..Default::default()
+    };
     needs.scripts.insert(Script::Devanagari);
     let plan = resolve_script_font_plan(&Config::default(), &needs).expect("plan");
     assert_eq!(plan.families, vec!["Noto Sans Devanagari".to_string()]);
@@ -1419,8 +1425,10 @@ fn resolve_script_font_plan_release_repo() {
 
     let mut config = Config::default();
     config.font.family = "serif".to_string();
-    let mut needs = FontFallbackNeeds::default();
-    needs.needs_unicode = true;
+    let mut needs = FontFallbackNeeds {
+        needs_unicode: true,
+        ..Default::default()
+    };
     needs.scripts.insert(Script::Devanagari);
     let plan = resolve_script_font_plan(&config, &needs).expect("plan");
     assert_eq!(plan.families, vec!["Noto Serif Devanagari".to_string()]);
@@ -1450,8 +1458,10 @@ fn resolve_script_font_plan_dedupes_scripts() {
     let state = Arc::new(NotofontsState(repos));
     let prev = set_notofonts_state(Some(state));
 
-    let mut needs = FontFallbackNeeds::default();
-    needs.needs_unicode = true;
+    let mut needs = FontFallbackNeeds {
+        needs_unicode: true,
+        ..Default::default()
+    };
     needs.scripts.insert(Script::Latin);
     needs.scripts.insert(Script::Greek);
     needs.scripts.insert(Script::Unknown);
@@ -1469,8 +1479,10 @@ fn ensure_fonts_available_respects_auto_download_env() {
     let prev = std::env::var("CRYOSNAP_FONT_AUTO_DOWNLOAD").ok();
     std::env::set_var("CRYOSNAP_FONT_AUTO_DOWNLOAD", "0");
     let cfg = Config::default();
-    let mut needs = FontFallbackNeeds::default();
-    needs.needs_nf = true;
+    let needs = FontFallbackNeeds {
+        needs_nf: true,
+        ..Default::default()
+    };
     let plan = ScriptFontPlan::default();
     ensure_fonts_available(&cfg, &needs, &plan).expect("ensure");
     restore_env_var("CRYOSNAP_FONT_AUTO_DOWNLOAD", prev);
@@ -1489,8 +1501,10 @@ fn ensure_fonts_available_skips_downloads_when_fonts_present() {
     cfg.font.system_fallback = FontSystemFallback::Never;
     cfg.font.auto_download = true;
 
-    let mut needs = FontFallbackNeeds::default();
-    needs.needs_nf = true;
+    let needs = FontFallbackNeeds {
+        needs_nf: true,
+        ..Default::default()
+    };
     let plan = ScriptFontPlan {
         downloads: vec![ScriptDownload {
             family: "Symbols Nerd Font Mono".to_string(),
@@ -1754,7 +1768,9 @@ fn header_value(request: &str, key: &str) -> Option<String> {
     request.lines().find_map(|line| {
         let trimmed = line.trim_end_matches('\r');
         if trimmed.to_ascii_lowercase().starts_with(&format!("{key}:")) {
-            trimmed.splitn(2, ':').nth(1).map(|v| v.trim().to_string())
+            trimmed
+                .split_once(':')
+                .map(|(_, value)| value.trim().to_string())
         } else {
             None
         }

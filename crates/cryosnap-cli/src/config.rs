@@ -160,8 +160,10 @@ mod tests {
         let _lock = env_lock().lock().expect("lock");
         let dir = tempdir().expect("temp dir");
         env::set_var("CRYOSNAP_CONFIG_DIR", dir.path());
-        let mut cfg = Config::default();
-        cfg.theme = "custom".to_string();
+        let cfg = Config {
+            theme: "custom".to_string(),
+            ..Config::default()
+        };
         save_user_config(&cfg).expect("save");
         let loaded = load_user_config().expect("load");
         assert_eq!(loaded.theme, "custom");
