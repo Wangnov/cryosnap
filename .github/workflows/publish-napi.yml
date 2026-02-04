@@ -53,6 +53,21 @@ jobs:
         working-directory: crates/cryosnap-node
         run: npm install
 
+      - name: Install musl toolchains
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
+            sudo ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-linux-musl-gcc
+            sudo ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-linux-musl-g++
+          fi
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            curl -L https://musl.cc/aarch64-linux-musl-cross.tgz | sudo tar -xz -C /opt
+            sudo ln -sf /opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc /usr/local/bin/aarch64-linux-musl-gcc
+            sudo ln -sf /opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-g++ /usr/local/bin/aarch64-linux-musl-g++
+          fi
+
       - name: Install aarch64 GCC
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
@@ -65,7 +80,13 @@ jobs:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: npm exec --yes --package @napi-rs/cli napi -- build --release --platform --no-js --dts artifacts/ignored.d.ts --output-dir artifacts ${{ matrix.build_args }}
+          CC_x86_64_unknown_linux_musl: x86_64-linux-musl-gcc
+          CXX_x86_64_unknown_linux_musl: x86_64-linux-musl-g++
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: x86_64-linux-musl-gcc
+          CC_aarch64_unknown_linux_musl: aarch64-linux-musl-gcc
+          CXX_aarch64_unknown_linux_musl: aarch64-linux-musl-g++
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-musl-gcc
+        run: npm exec --yes --package @napi-rs/cli napi -- build --release --platform --no-js --dts ignored.d.ts --output-dir artifacts ${{ matrix.build_args }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
