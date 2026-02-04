@@ -1436,6 +1436,11 @@ mod tests {
         }
     }
 
+    fn asset_path(name: &str) -> PathBuf {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        manifest.join("..").join("..").join("assets").join(name)
+    }
+
     #[test]
     fn run_interactive_updates_config() {
         let prompter = FakePrompter::new();
@@ -1544,6 +1549,18 @@ mod tests {
     }
 
     #[test]
+    fn write_output_to_file_prints_when_tty() {
+        let dir = tempdir().expect("temp dir");
+        let path = dir.path().join("out.svg");
+        let result = cryosnap_core::RenderResult {
+            format: OutputFormat::Svg,
+            bytes: b"<svg/>".to_vec(),
+        };
+        write_output_with_tty(result, Some(&path), None, None, true).expect("write");
+        assert!(path.exists());
+    }
+
+    #[test]
     fn write_output_default_name() {
         let _lock = cwd_lock().lock().expect("lock");
         let dir = tempdir().expect("temp dir");
@@ -1556,6 +1573,37 @@ mod tests {
         write_output_with_tty(result, None, Some("file.rs"), Some(FormatArg::Png), true)
             .expect("write");
         assert!(dir.path().join("cryosnap.png").exists());
+        std::env::set_current_dir(cwd).expect("restore");
+    }
+
+    #[test]
+    fn write_output_default_name_webp() {
+        let _lock = cwd_lock().lock().expect("lock");
+        let dir = tempdir().expect("temp dir");
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("chdir");
+        let result = cryosnap_core::RenderResult {
+            format: OutputFormat::Webp,
+            bytes: b"webp".to_vec(),
+        };
+        write_output_with_tty(result, None, Some("file.rs"), Some(FormatArg::Webp), true)
+            .expect("write");
+        assert!(dir.path().join("cryosnap.webp").exists());
+        std::env::set_current_dir(cwd).expect("restore");
+    }
+
+    #[test]
+    fn write_output_default_name_svg() {
+        let _lock = cwd_lock().lock().expect("lock");
+        let dir = tempdir().expect("temp dir");
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("chdir");
+        let result = cryosnap_core::RenderResult {
+            format: OutputFormat::Svg,
+            bytes: b"<svg/>".to_vec(),
+        };
+        write_output_with_tty(result, None, None, None, true).expect("write");
+        assert!(dir.path().join("cryosnap.svg").exists());
         std::env::set_current_dir(cwd).expect("restore");
     }
 
@@ -1609,6 +1657,13 @@ mod tests {
     fn expand_output_pattern_invalid() {
         let err = expand_output_pattern(&PathBuf::from("out.{svg,png")).err();
         assert!(err.is_some());
+    }
+
+    #[test]
+    fn expand_output_pattern_invalid_variants() {
+        assert!(expand_output_pattern(Path::new("out.}{")).is_err());
+        assert!(expand_output_pattern(Path::new("out.{svg,{png}}")).is_err());
+        assert!(expand_output_pattern(Path::new("out.{}")).is_err());
     }
 
     #[test]
@@ -1716,6 +1771,33 @@ mod tests {
     }
 
     #[test]
+    fn run_with_font_overrides_and_file_input() {
+        let _lock = env_lock().lock().expect("lock");
+        let dir = tempdir().expect("temp dir");
+        let input_path = dir.path().join("input.txt");
+        let out_path = dir.path().join("out.svg");
+        let fonts_dir = dir.path().join("fonts");
+        std::fs::create_dir_all(&fonts_dir).expect("fonts dir");
+        std::fs::write(&input_path, "hello").expect("write");
+        let font_file = asset_path("JetBrainsMono-Regular.ttf");
+
+        let mut args = Args::parse_from(["cryosnap"]);
+        args.input = Some(input_path.to_string_lossy().to_string());
+        args.output = Some(out_path.clone());
+        args.font_file = Some(font_file.to_string_lossy().to_string());
+        args.font_fallbacks = Some("Noto Sans CJK SC".to_string());
+        args.font_dirs = Some(fonts_dir.to_string_lossy().to_string());
+        args.font_cjk_region = Some(FontCjkRegionArg::Jp);
+        args.font_auto_download = Some(false);
+        args.font_force_update = Some(true);
+        args.font_system_fallback = Some(FontSystemFallbackArg::Never);
+
+        let result = run_with(args, true, false, None);
+        assert!(result.is_ok());
+        assert!(out_path.exists());
+    }
+
+    #[test]
     fn resolve_format_from_arg() {
         let out = resolve_format(Some(FormatArg::Png), None);
         assert!(matches!(out, OutputFormat::Png));
@@ -1812,6 +1894,430 @@ mod tests {
     fn extract_tmux_target_from_compact_flag() {
         let args = vec!["-t%9".to_string(), "-S".to_string(), "-5".to_string()];
         assert_eq!(extract_tmux_target(&args), Some("%9".to_string()));
+    }
+
+    #[test]
+    fn arg_enum_conversions_cover_variants() {
+        assert!(matches!(PngStrip::from(PngStripArg::None), PngStrip::None));
+        assert!(matches!(PngStrip::from(PngStripArg::Safe), PngStrip::Safe));
+        assert!(matches!(PngStrip::from(PngStripArg::All), PngStrip::All));
+
+        assert!(matches!(
+            RasterBackend::from(RasterBackendArg::Auto),
+            RasterBackend::Auto
+        ));
+        assert!(matches!(
+            RasterBackend::from(RasterBackendArg::Resvg),
+            RasterBackend::Resvg
+        ));
+        assert!(matches!(
+            RasterBackend::from(RasterBackendArg::Rsvg),
+            RasterBackend::Rsvg
+        ));
+
+        assert!(matches!(
+            FontSystemFallback::from(FontSystemFallbackArg::Auto),
+            FontSystemFallback::Auto
+        ));
+        assert!(matches!(
+            FontSystemFallback::from(FontSystemFallbackArg::Always),
+            FontSystemFallback::Always
+        ));
+        assert!(matches!(
+            FontSystemFallback::from(FontSystemFallbackArg::Never),
+            FontSystemFallback::Never
+        ));
+
+        assert!(matches!(
+            CjkRegion::from(FontCjkRegionArg::Auto),
+            CjkRegion::Auto
+        ));
+        assert!(matches!(
+            CjkRegion::from(FontCjkRegionArg::Sc),
+            CjkRegion::Sc
+        ));
+        assert!(matches!(
+            CjkRegion::from(FontCjkRegionArg::Tc),
+            CjkRegion::Tc
+        ));
+        assert!(matches!(
+            CjkRegion::from(FontCjkRegionArg::Hk),
+            CjkRegion::Hk
+        ));
+        assert!(matches!(
+            CjkRegion::from(FontCjkRegionArg::Jp),
+            CjkRegion::Jp
+        ));
+        assert!(matches!(
+            CjkRegion::from(FontCjkRegionArg::Kr),
+            CjkRegion::Kr
+        ));
+
+        assert!(matches!(
+            PngQuantPreset::from(PngQuantPresetArg::Fast),
+            PngQuantPreset::Fast
+        ));
+        assert!(matches!(
+            PngQuantPreset::from(PngQuantPresetArg::Balanced),
+            PngQuantPreset::Balanced
+        ));
+        assert!(matches!(
+            PngQuantPreset::from(PngQuantPresetArg::Best),
+            PngQuantPreset::Best
+        ));
+
+        assert!(matches!(
+            TitleAlign::from(TitleAlignArg::Left),
+            TitleAlign::Left
+        ));
+        assert!(matches!(
+            TitleAlign::from(TitleAlignArg::Center),
+            TitleAlign::Center
+        ));
+        assert!(matches!(
+            TitleAlign::from(TitleAlignArg::Right),
+            TitleAlign::Right
+        ));
+
+        assert!(matches!(
+            TitlePathStyle::from(TitlePathStyleArg::Absolute),
+            TitlePathStyle::Absolute
+        ));
+        assert!(matches!(
+            TitlePathStyle::from(TitlePathStyleArg::Relative),
+            TitlePathStyle::Relative
+        ));
+        assert!(matches!(
+            TitlePathStyle::from(TitlePathStyleArg::Basename),
+            TitlePathStyle::Basename
+        ));
+    }
+
+    #[test]
+    fn parse_font_fallbacks_splits_and_trims() {
+        let out = parse_font_fallbacks("A, B , ,C").expect("parse");
+        assert_eq!(out, vec!["A", "B", "C"]);
+    }
+
+    #[test]
+    fn parse_font_fallbacks_empty_returns_empty() {
+        let out = parse_font_fallbacks("   ").expect("parse");
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn parse_font_dirs_splits_and_trims() {
+        let out = parse_font_dirs(" /a, , /b ").expect("parse");
+        assert_eq!(out, vec!["/a", "/b"]);
+    }
+
+    #[test]
+    fn parse_font_dirs_empty_returns_empty() {
+        let out = parse_font_dirs("  ").expect("parse");
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn parse_timeout_ms_invalid() {
+        assert!(parse_timeout_ms("oops").is_err());
+    }
+
+    #[test]
+    fn parse_timeout_ms_rejects_overflow() {
+        let err = parse_timeout_ms("18446744073709552s").unwrap_err();
+        assert!(err.to_string().contains("timeout too large"));
+    }
+
+    #[test]
+    fn run_with_output_pattern_writes_multiple() {
+        let dir = tempdir().expect("temp dir");
+        let mut args = Args::parse_from(["cryosnap"]);
+        args.input = Some("-".to_string());
+        args.output = Some(dir.path().join("out.{svg,png}"));
+        let result = run_with(args, false, false, Some("hello"));
+        assert!(result.is_ok());
+        assert!(dir.path().join("out.svg").exists());
+        assert!(dir.path().join("out.png").exists());
+    }
+
+    #[test]
+    fn run_with_output_pattern_writes_webp_and_prints() {
+        let dir = tempdir().expect("temp dir");
+        let mut args = Args::parse_from(["cryosnap"]);
+        args.input = Some("-".to_string());
+        args.output = Some(dir.path().join("out.{svg,webp}"));
+        let result = run_with(args, false, true, Some("hello"));
+        assert!(result.is_ok());
+        assert!(dir.path().join("out.svg").exists());
+        assert!(dir.path().join("out.webp").exists());
+    }
+
+    #[test]
+    fn run_with_help_when_no_input_and_tty() {
+        let args = Args::parse_from(["cryosnap"]);
+        let result = run_with(args, true, false, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn run_with_stdout_tty_default_png() {
+        let _lock = cwd_lock().lock().expect("lock");
+        let dir = tempdir().expect("temp dir");
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("chdir");
+
+        let args = Args::parse_from(["cryosnap"]);
+        let result = run_with(args, false, true, Some("hello"));
+        assert!(result.is_ok());
+        assert!(dir.path().join("cryosnap.png").exists());
+
+        std::env::set_current_dir(cwd).expect("restore");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_with_execute_command_output() {
+        let _lock = env_lock().lock().expect("lock");
+        let dir = tempdir().expect("temp dir");
+        let out_path = dir.path().join("out.svg");
+        let mut args = Args::parse_from(["cryosnap"]);
+        args.execute = Some("printf 'hello'".to_string());
+        args.output = Some(out_path.clone());
+        let result = run_with(args, true, false, None);
+        assert!(result.is_ok());
+        let content = std::fs::read_to_string(out_path).expect("read");
+        assert!(content.contains("<svg"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_with_tmux_capture_uses_fake_tmux() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = env_lock().lock().expect("lock");
+        let bin_dir = tempdir().expect("temp dir");
+        let tmux_path = bin_dir.path().join("tmux");
+        let script = r#"#!/bin/sh
+if [ "$1" = "capture-pane" ]; then
+  echo "line1"
+  exit 0
+fi
+if [ "$1" = "display-message" ]; then
+  echo "tmux title"
+  exit 0
+fi
+echo "unexpected" 1>&2
+exit 1
+"#;
+        std::fs::write(&tmux_path, script).expect("write");
+        let mut perms = std::fs::metadata(&tmux_path).expect("meta").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&tmux_path, perms).expect("chmod");
+
+        let prev_path = std::env::var("PATH").ok();
+        let new_path = format!(
+            "{}:{}",
+            bin_dir.path().display(),
+            prev_path.clone().unwrap_or_default()
+        );
+        std::env::set_var("PATH", new_path);
+
+        let dir = tempdir().expect("temp dir");
+        let out_path = dir.path().join("out.svg");
+        let mut args = Args::parse_from(["cryosnap"]);
+        args.tmux = true;
+        args.tmux_args = Some("-t %3".to_string());
+        args.output = Some(out_path.clone());
+        args.title = Some(true);
+        args.title_tmux_format = Some("#{pane_title}".to_string());
+
+        let result = run_with(args, true, false, None);
+        assert!(result.is_ok());
+        assert!(out_path.exists());
+
+        if let Some(path) = prev_path {
+            std::env::set_var("PATH", path);
+        } else {
+            std::env::remove_var("PATH");
+        }
+    }
+
+    #[test]
+    fn run_interactive_with_stdin_choice() {
+        let prompter = FakePrompter::new();
+        prompter.selects.borrow_mut().push_back(2);
+        prompter.selects.borrow_mut().push_back(1);
+        prompter.selects.borrow_mut().push_back(5);
+        prompter.strings.borrow_mut().push_back("charm".to_string());
+        prompter
+            .strings
+            .borrow_mut()
+            .push_back("#000000".to_string());
+        prompter.strings.borrow_mut().push_back("10".to_string());
+        prompter.strings.borrow_mut().push_back("5".to_string());
+        prompter
+            .strings
+            .borrow_mut()
+            .push_back("#333333".to_string());
+        prompter.strings.borrow_mut().push_back("Test".to_string());
+        prompter
+            .strings
+            .borrow_mut()
+            .push_back("Symbols Nerd Font Mono".to_string());
+        prompter.strings.borrow_mut().push_back("/a,/b".to_string());
+        prompter.floats.borrow_mut().push_back(4.0);
+        prompter.floats.borrow_mut().push_back(1.0);
+        prompter.floats.borrow_mut().push_back(6.0);
+        prompter.floats.borrow_mut().push_back(0.0);
+        prompter.floats.borrow_mut().push_back(12.0);
+        prompter.floats.borrow_mut().push_back(14.0);
+        prompter.floats.borrow_mut().push_back(1.3);
+        prompter.bools.borrow_mut().push_back(true);
+        prompter.bools.borrow_mut().push_back(false);
+        prompter.bools.borrow_mut().push_back(false);
+        prompter.bools.borrow_mut().push_back(true);
+        prompter.bools.borrow_mut().push_back(true);
+
+        let mut cfg = Config::default();
+        let mut input = None;
+        let mut execute = None;
+        run_interactive_with(&prompter, &mut cfg, &mut input, &mut execute).expect("interactive");
+        assert_eq!(input.as_deref(), Some("-"));
+        assert!(execute.is_none());
+        assert!(matches!(
+            cfg.font.system_fallback,
+            FontSystemFallback::Always
+        ));
+        assert!(matches!(cfg.font.cjk_region, CjkRegion::Kr));
+        assert_eq!(cfg.font.dirs, vec!["/a".to_string(), "/b".to_string()]);
+    }
+
+    #[test]
+    fn run_interactive_selects_never_fallback_and_hk_region() {
+        let prompter = FakePrompter::new();
+        prompter.selects.borrow_mut().push_back(2);
+        prompter.selects.borrow_mut().push_back(2);
+        prompter.selects.borrow_mut().push_back(3);
+        prompter.strings.borrow_mut().push_back("charm".to_string());
+        prompter
+            .strings
+            .borrow_mut()
+            .push_back("#111111".to_string());
+        prompter.strings.borrow_mut().push_back("1".to_string());
+        prompter.strings.borrow_mut().push_back("2".to_string());
+        prompter
+            .strings
+            .borrow_mut()
+            .push_back("#222222".to_string());
+        prompter.strings.borrow_mut().push_back("Test".to_string());
+        prompter
+            .strings
+            .borrow_mut()
+            .push_back("Alpha, Beta".to_string());
+        prompter.strings.borrow_mut().push_back(String::new());
+        prompter.floats.borrow_mut().push_back(2.0);
+        prompter.floats.borrow_mut().push_back(0.5);
+        prompter.floats.borrow_mut().push_back(3.0);
+        prompter.floats.borrow_mut().push_back(0.0);
+        prompter.floats.borrow_mut().push_back(1.0);
+        prompter.floats.borrow_mut().push_back(13.0);
+        prompter.floats.borrow_mut().push_back(1.5);
+        prompter.bools.borrow_mut().push_back(false);
+        prompter.bools.borrow_mut().push_back(true);
+        prompter.bools.borrow_mut().push_back(false);
+        prompter.bools.borrow_mut().push_back(true);
+        prompter.bools.borrow_mut().push_back(true);
+
+        let mut cfg = Config::default();
+        cfg.font.fallbacks = vec!["Existing".to_string()];
+        cfg.font.dirs = vec!["/tmp/fonts".to_string()];
+        let mut input = None;
+        let mut execute = None;
+        run_interactive_with(&prompter, &mut cfg, &mut input, &mut execute).expect("interactive");
+        assert_eq!(input.as_deref(), Some("-"));
+        assert!(matches!(
+            cfg.font.system_fallback,
+            FontSystemFallback::Never
+        ));
+        assert!(matches!(cfg.font.cjk_region, CjkRegion::Hk));
+        assert_eq!(
+            cfg.font.fallbacks,
+            vec!["Alpha".to_string(), "Beta".to_string()]
+        );
+        assert!(cfg.font.dirs.is_empty());
+    }
+
+    #[test]
+    fn default_app_dir_uses_env() {
+        let _lock = env_lock().lock().expect("lock");
+        let dir = tempdir().expect("temp dir");
+        let prev = std::env::var("CRYOSNAP_HOME").ok();
+        std::env::set_var("CRYOSNAP_HOME", dir.path());
+        let out = default_app_dir().expect("dir");
+        assert_eq!(out, dir.path());
+        if let Some(value) = prev {
+            std::env::set_var("CRYOSNAP_HOME", value);
+        } else {
+            std::env::remove_var("CRYOSNAP_HOME");
+        }
+    }
+
+    #[test]
+    fn migrate_legacy_user_config_copies() {
+        let _lock = env_lock().lock().expect("lock");
+        let legacy_root = tempdir().expect("temp dir");
+        let target_root = tempdir().expect("temp dir");
+        let prev = std::env::var("XDG_CONFIG_HOME").ok();
+        std::env::set_var("XDG_CONFIG_HOME", legacy_root.path());
+
+        let legacy_path = legacy_user_config_path().expect("legacy path");
+        if let Some(parent) = legacy_path.parent() {
+            std::fs::create_dir_all(parent).expect("create legacy dir");
+        }
+        std::fs::write(&legacy_path, r#"{\"theme\":\"custom\"}"#).expect("write");
+
+        let target_path = target_root.path().join("user.json");
+        migrate_legacy_user_config(&target_path).expect("migrate");
+        let content = std::fs::read_to_string(&target_path).expect("read");
+        assert!(content.contains("custom"));
+
+        if let Some(value) = prev {
+            std::env::set_var("XDG_CONFIG_HOME", value);
+        } else {
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+    }
+
+    #[test]
+    fn tmux_title_empty_format_returns_none() {
+        assert!(tmux_title(None, " ").is_none());
+    }
+
+    #[test]
+    fn tmux_title_missing_tmux_returns_none() {
+        let _lock = env_lock().lock().expect("lock");
+        let prev_path = std::env::var("PATH").ok();
+        std::env::set_var("PATH", "");
+        assert!(tmux_title(None, "#{pane_title}").is_none());
+        if let Some(path) = prev_path {
+            std::env::set_var("PATH", path);
+        } else {
+            std::env::remove_var("PATH");
+        }
+    }
+
+    #[test]
+    fn capture_tmux_output_missing_tmux_errors() {
+        let _lock = env_lock().lock().expect("lock");
+        let prev_path = std::env::var("PATH").ok();
+        std::env::set_var("PATH", "");
+        let err = capture_tmux_output(None).unwrap_err();
+        assert!(err.to_string().contains("failed to run tmux"));
+        if let Some(path) = prev_path {
+            std::env::set_var("PATH", path);
+        } else {
+            std::env::remove_var("PATH");
+        }
     }
 
     fn cwd_lock() -> &'static Mutex<()> {
