@@ -1,15 +1,19 @@
 use base64::Engine;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::env;
-use std::io::{Cursor, Write};
+use std::fs;
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, FontStyle, ThemeSet};
 use syntect::parsing::SyntaxSet;
+use unicode_script::{Script, UnicodeScript};
 
 const FONT_HEIGHT_TO_WIDTH_RATIO: f32 = 1.68;
 const DEFAULT_TAB_WIDTH: usize = 4;
@@ -32,28 +36,74 @@ const AUTO_FALLBACK_NF: &[&str] = &["Symbols Nerd Font Mono"];
 const AUTO_FALLBACK_CJK: &[&str] = &[
     "Noto Sans Mono CJK SC",
     "Noto Sans Mono CJK TC",
+    "Noto Sans Mono CJK HK",
     "Noto Sans Mono CJK JP",
     "Noto Sans Mono CJK KR",
     "Noto Sans CJK SC",
     "Noto Sans CJK TC",
+    "Noto Sans CJK HK",
     "Noto Sans CJK JP",
     "Noto Sans CJK KR",
     "Source Han Sans SC",
     "Source Han Sans TC",
+    "Source Han Sans HK",
     "Source Han Sans JP",
     "Source Han Sans KR",
     "PingFang SC",
     "PingFang TC",
+    "PingFang HK",
     "Hiragino Sans GB",
     "Hiragino Sans",
     "Apple SD Gothic Neo",
     "Microsoft YaHei",
+    "Microsoft JhengHei",
     "SimSun",
     "MS Gothic",
     "Meiryo",
+    "Yu Gothic",
     "Malgun Gothic",
     "WenQuanYi Micro Hei",
     "WenQuanYi Zen Hei",
+];
+const AUTO_FALLBACK_CJK_SC: &[&str] = &[
+    "Noto Sans Mono CJK SC",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+    "PingFang SC",
+    "Microsoft YaHei",
+    "SimSun",
+    "WenQuanYi Micro Hei",
+    "WenQuanYi Zen Hei",
+];
+const AUTO_FALLBACK_CJK_TC: &[&str] = &[
+    "Noto Sans Mono CJK TC",
+    "Noto Sans CJK TC",
+    "Source Han Sans TC",
+    "PingFang TC",
+    "Microsoft JhengHei",
+];
+const AUTO_FALLBACK_CJK_HK: &[&str] = &[
+    "Noto Sans Mono CJK HK",
+    "Noto Sans CJK HK",
+    "Source Han Sans HK",
+    "PingFang HK",
+    "Microsoft JhengHei",
+];
+const AUTO_FALLBACK_CJK_JP: &[&str] = &[
+    "Noto Sans Mono CJK JP",
+    "Noto Sans CJK JP",
+    "Source Han Sans JP",
+    "Hiragino Sans",
+    "Yu Gothic",
+    "MS Gothic",
+    "Meiryo",
+];
+const AUTO_FALLBACK_CJK_KR: &[&str] = &[
+    "Noto Sans Mono CJK KR",
+    "Noto Sans CJK KR",
+    "Source Han Sans KR",
+    "Apple SD Gothic Neo",
+    "Malgun Gothic",
 ];
 const AUTO_FALLBACK_GLOBAL: &[&str] = &[
     "Noto Sans",
@@ -61,11 +111,35 @@ const AUTO_FALLBACK_GLOBAL: &[&str] = &[
     "Segoe UI",
     "Arial Unicode MS",
 ];
-const AUTO_FALLBACK_EMOJI: &[&str] = &[
-    "Apple Color Emoji",
-    "Segoe UI Emoji",
-    "Noto Color Emoji",
+const AUTO_FALLBACK_EMOJI: &[&str] = &["Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"];
+const NOTOFONTS_STATE_URL: &str =
+    "https://raw.githubusercontent.com/notofonts/notofonts.github.io/main/state.json";
+const NOTOFONTS_FILES_REPO: &str = "notofonts/notofonts.github.io";
+const NOTO_EMOJI_URLS: &[&str] = &[
+    "https://raw.githubusercontent.com/googlefonts/noto-emoji/main/fonts/NotoColorEmoji.ttf",
+    "https://raw.githubusercontent.com/notofonts/noto-emoji/main/fonts/NotoColorEmoji.ttf",
 ];
+const NOTO_CJK_SC_URLS: &[&str] = &[
+    "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+    "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+];
+const NOTO_CJK_TC_URLS: &[&str] = &[
+    "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf",
+    "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf",
+];
+const NOTO_CJK_HK_URLS: &[&str] = &[
+    "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/HongKong/NotoSansCJKhk-Regular.otf",
+    "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/HongKong/NotoSansCJKhk-Regular.otf",
+];
+const NOTO_CJK_JP_URLS: &[&str] = &[
+    "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf",
+    "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf",
+];
+const NOTO_CJK_KR_URLS: &[&str] = &[
+    "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf",
+    "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf",
+];
+const DEFAULT_GITHUB_PROXIES: &[&str] = &["https://fastgit.cc/", "https://ghfast.top/"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -169,17 +243,29 @@ pub struct Font {
     pub fallbacks: Vec<String>,
     #[serde(rename = "system_fallback")]
     pub system_fallback: FontSystemFallback,
+    #[serde(rename = "auto_download")]
+    pub auto_download: bool,
+    #[serde(rename = "force_update")]
+    pub force_update: bool,
+    #[serde(rename = "cjk_region")]
+    pub cjk_region: CjkRegion,
+    #[serde(rename = "dirs")]
+    pub dirs: Vec<String>,
 }
 
 impl Default for Font {
     fn default() -> Self {
         Self {
-            family: "JetBrains Mono".to_string(),
+            family: "monospace".to_string(),
             file: None,
             size: 14.0,
             ligatures: true,
             fallbacks: Vec::new(),
             system_fallback: FontSystemFallback::default(),
+            auto_download: true,
+            force_update: false,
+            cjk_region: CjkRegion::default(),
+            dirs: Vec::new(),
         }
     }
 }
@@ -191,6 +277,18 @@ pub enum FontSystemFallback {
     Auto,
     Always,
     Never,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum CjkRegion {
+    #[default]
+    Auto,
+    Sc,
+    Tc,
+    Hk,
+    Jp,
+    Kr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -409,8 +507,19 @@ fn render_svg_with_plan(input: &InputSource, config: &Config) -> Result<Rendered
     };
 
     let title_text = resolve_title_text(input, config);
-    let font_plan = build_font_plan(config, &lines, title_text.as_deref());
-    let font_css = svg_font_face_css(config, &font_plan)?;
+    let needs = collect_font_fallback_needs(&lines, title_text.as_deref());
+    let script_plan = resolve_script_font_plan(config, &needs);
+    let script_plan = match script_plan {
+        Ok(plan) => plan,
+        Err(err) => {
+            eprintln!("cryosnap: font plan failed: {}", err);
+            ScriptFontPlan::default()
+        }
+    };
+    let _ = ensure_fonts_available(config, &needs, &script_plan);
+    let app_families = load_app_font_families(config).unwrap_or_default();
+    let font_plan = build_font_plan(config, &needs, &app_families, &script_plan.families);
+    let font_css = svg_font_face_css(config)?;
     let svg = build_svg(
         &lines,
         config,
@@ -432,8 +541,6 @@ pub fn render_png(input: &InputSource, config: &Config) -> Result<Vec<u8>> {
         &rendered.bytes,
         config,
         rendered.font_plan.needs_system_fonts,
-        rendered.font_plan.needs_jetbrains_font,
-        rendered.font_plan.needs_symbols_font,
     )
 }
 
@@ -443,28 +550,18 @@ pub fn render_webp(input: &InputSource, config: &Config) -> Result<Vec<u8>> {
         &rendered.bytes,
         config,
         rendered.font_plan.needs_system_fonts,
-        rendered.font_plan.needs_jetbrains_font,
-        rendered.font_plan.needs_symbols_font,
     )
 }
 
 pub fn render_png_from_svg(svg: &[u8], config: &Config) -> Result<Vec<u8>> {
     let needs = font_needs_from_svg(svg, config);
-    render_png_from_svg_with_plan(
-        svg,
-        config,
-        needs.needs_system_fonts,
-        needs.needs_jetbrains_font,
-        needs.needs_symbols_font,
-    )
+    render_png_from_svg_with_plan(svg, config, needs.needs_system_fonts)
 }
 
 fn render_png_from_svg_with_plan(
     svg: &[u8],
     config: &Config,
     needs_system_fonts: bool,
-    needs_jetbrains_font: bool,
-    needs_symbols_font: bool,
 ) -> Result<Vec<u8>> {
     if let Some(png) = try_render_png_with_rsvg(svg, config)? {
         let png = if config.png.quantize {
@@ -475,13 +572,7 @@ fn render_png_from_svg_with_plan(
         return optimize_png(png, &config.png);
     }
 
-    let pixmap = rasterize_svg(
-        svg,
-        config,
-        needs_system_fonts,
-        needs_jetbrains_font,
-        needs_symbols_font,
-    )?;
+    let pixmap = rasterize_svg(svg, config, needs_system_fonts)?;
     let png = if config.png.quantize {
         quantize_pixmap_to_png(&pixmap, &config.png)?
     } else {
@@ -494,89 +585,51 @@ fn render_png_from_svg_with_plan(
 
 pub fn render_webp_from_svg(svg: &[u8], config: &Config) -> Result<Vec<u8>> {
     let needs = font_needs_from_svg(svg, config);
-    render_webp_from_svg_with_plan(
-        svg,
-        config,
-        needs.needs_system_fonts,
-        needs.needs_jetbrains_font,
-        needs.needs_symbols_font,
-    )
+    render_webp_from_svg_with_plan(svg, config, needs.needs_system_fonts)
 }
 
 fn render_webp_from_svg_with_plan(
     svg: &[u8],
     config: &Config,
     needs_system_fonts: bool,
-    needs_jetbrains_font: bool,
-    needs_symbols_font: bool,
 ) -> Result<Vec<u8>> {
     if matches!(config.raster.backend, RasterBackend::Rsvg) {
         return Err(Error::Render(
             "rsvg backend does not support webp output".to_string(),
         ));
     }
-    let pixmap = rasterize_svg(
-        svg,
-        config,
-        needs_system_fonts,
-        needs_jetbrains_font,
-        needs_symbols_font,
-    )?;
+    let pixmap = rasterize_svg(svg, config, needs_system_fonts)?;
     pixmap_to_webp(&pixmap)
 }
 
 #[derive(Debug, Default, Clone, Copy)]
 struct SvgFontNeeds {
     needs_system_fonts: bool,
-    needs_jetbrains_font: bool,
-    needs_symbols_font: bool,
 }
 
 fn font_needs_from_svg(svg: &[u8], config: &Config) -> SvgFontNeeds {
-    let needs_primary_system_font =
-        config.font.file.is_none() && !is_jetbrains_mono(&config.font.family);
-    let fallbacks_need_system = fallbacks_require_system_fonts(&config.font.fallbacks);
-
     let mut needs = FontFallbackNeeds::default();
-    let mut has_symbols_family = false;
-    let mut has_jetbrains_family = is_jetbrains_mono(&config.font.family);
     let svg_text = std::str::from_utf8(svg).ok();
     if let Some(text) = svg_text {
         scan_text_fallbacks(text, &mut needs);
-        has_symbols_family = text
-            .to_ascii_lowercase()
-            .contains("symbols nerd font mono");
-        if !has_jetbrains_family {
-            has_jetbrains_family = text.to_ascii_lowercase().contains("jetbrains mono");
-        }
     }
-
-    let needs_system_fonts = if needs_primary_system_font {
-        true
-    } else {
-        match config.font.system_fallback {
-            FontSystemFallback::Never => false,
-            FontSystemFallback::Always => true,
-            FontSystemFallback::Auto => {
-                if fallbacks_need_system {
-                    true
-                } else if svg_text.is_none() {
-                    true
-                } else {
-                    needs.needs_unicode
-                }
-            }
+    let script_plan = resolve_script_font_plan(config, &needs);
+    let script_plan = match script_plan {
+        Ok(plan) => plan,
+        Err(err) => {
+            eprintln!("cryosnap: font plan failed: {}", err);
+            ScriptFontPlan::default()
         }
     };
-
-    let needs_symbols_font =
-        has_symbols_family || needs.needs_nf || is_symbols_nerd_font_mono(&config.font.family);
-
-    SvgFontNeeds {
-        needs_system_fonts,
-        needs_jetbrains_font: has_jetbrains_family,
-        needs_symbols_font,
+    let _ = ensure_fonts_available(config, &needs, &script_plan);
+    let app_families = load_app_font_families(config).unwrap_or_default();
+    let families = build_font_families(config, &needs, &script_plan.families);
+    let mut needs_system_fonts = needs_system_fonts(config, &app_families, &families);
+    if svg_text.is_none() && matches!(config.font.system_fallback, FontSystemFallback::Auto) {
+        needs_system_fonts = true;
     }
+
+    SvgFontNeeds { needs_system_fonts }
 }
 
 fn try_render_png_with_rsvg(svg: &[u8], config: &Config) -> Result<Option<Vec<u8>>> {
@@ -678,16 +731,9 @@ fn rasterize_svg(
     svg: &[u8],
     config: &Config,
     needs_system_fonts: bool,
-    needs_jetbrains_font: bool,
-    needs_symbols_font: bool,
 ) -> Result<tiny_skia::Pixmap> {
     let mut opt = usvg::Options::default();
-    let fontdb = build_fontdb(
-        config,
-        needs_system_fonts,
-        needs_jetbrains_font,
-        needs_symbols_font,
-    )?;
+    let fontdb = build_fontdb(config, needs_system_fonts)?;
     *opt.fontdb_mut() = fontdb;
 
     let tree = usvg::Tree::from_data(svg, &opt)
@@ -834,18 +880,40 @@ fn truncate_to_cells(text: &str, max_cells: usize, ellipsis: &str) -> String {
     out
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 struct FontFallbackNeeds {
     needs_unicode: bool,
     needs_nf: bool,
+    needs_cjk: bool,
+    needs_emoji: bool,
+    scripts: HashSet<Script>,
 }
 
 #[derive(Debug, Clone)]
 struct FontPlan {
     font_family: String,
     needs_system_fonts: bool,
-    needs_jetbrains_font: bool,
-    needs_symbols_font: bool,
+}
+
+#[derive(Debug, Default, Clone)]
+struct ScriptFontPlan {
+    families: Vec<String>,
+    downloads: Vec<ScriptDownload>,
+}
+
+#[derive(Debug, Clone)]
+struct ScriptDownload {
+    family: String,
+    repo: String,
+    file_path: String,
+    filename: String,
+    tag: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FontStylePreference {
+    Sans,
+    Serif,
 }
 
 fn is_private_use(ch: char) -> bool {
@@ -853,6 +921,40 @@ fn is_private_use(ch: char) -> bool {
     (0xE000..=0xF8FF).contains(&cp)
         || (0xF0000..=0xFFFFD).contains(&cp)
         || (0x100000..=0x10FFFD).contains(&cp)
+}
+
+fn is_cjk(ch: char) -> bool {
+    let cp = ch as u32;
+    matches!(
+        cp,
+        0x4E00..=0x9FFF
+            | 0x3400..=0x4DBF
+            | 0x20000..=0x2A6DF
+            | 0x2A700..=0x2B73F
+            | 0x2B740..=0x2B81F
+            | 0x2B820..=0x2CEAF
+            | 0x2CEB0..=0x2EBEF
+            | 0x2F800..=0x2FA1F
+            | 0x3040..=0x309F
+            | 0x30A0..=0x30FF
+            | 0x31F0..=0x31FF
+            | 0x1100..=0x11FF
+            | 0x3130..=0x318F
+            | 0xAC00..=0xD7AF
+            | 0x3100..=0x312F
+            | 0x31A0..=0x31BF
+    )
+}
+
+fn is_emoji(ch: char) -> bool {
+    let cp = ch as u32;
+    matches!(
+        cp,
+        0x2300..=0x23FF
+            | 0x2600..=0x27BF
+            | 0x2B00..=0x2BFF
+            | 0x1F000..=0x1FAFF
+    )
 }
 
 fn scan_text_fallbacks(text: &str, needs: &mut FontFallbackNeeds) {
@@ -863,8 +965,17 @@ fn scan_text_fallbacks(text: &str, needs: &mut FontFallbackNeeds) {
         if is_private_use(ch) {
             needs.needs_nf = true;
         }
-        if needs.needs_unicode && needs.needs_nf {
-            break;
+        if is_cjk(ch) {
+            needs.needs_cjk = true;
+        }
+        if is_emoji(ch) {
+            needs.needs_emoji = true;
+        }
+        if ch > '\u{7f}' {
+            let script = ch.script();
+            if !matches!(script, Script::Common | Script::Inherited | Script::Unknown) {
+                needs.scripts.insert(script);
+            }
         }
     }
 }
@@ -874,12 +985,6 @@ fn collect_font_fallback_needs(lines: &[Line], title_text: Option<&str>) -> Font
     for line in lines {
         for span in &line.spans {
             scan_text_fallbacks(&span.text, &mut needs);
-            if needs.needs_unicode && needs.needs_nf {
-                break;
-            }
-        }
-        if needs.needs_unicode && needs.needs_nf {
-            break;
         }
     }
     if let Some(title) = title_text {
@@ -899,113 +1004,1153 @@ fn push_family(out: &mut Vec<String>, seen: &mut HashSet<String>, name: &str) {
     }
 }
 
-fn build_font_plan(config: &Config, lines: &[Line], title_text: Option<&str>) -> FontPlan {
-    let needs = collect_font_fallback_needs(lines, title_text);
-    let needs_primary_system_font =
-        config.font.file.is_none() && !is_jetbrains_mono(&config.font.family);
-    let fallbacks_need_system = fallbacks_require_system_fonts(&config.font.fallbacks);
-    let add_unicode = match config.font.system_fallback {
-        FontSystemFallback::Never => false,
-        FontSystemFallback::Always => true,
-        FontSystemFallback::Auto => needs.needs_unicode,
-    };
-    let add_nf = needs.needs_nf;
-    let needs_system_fonts = needs_primary_system_font
-        || match config.font.system_fallback {
-            FontSystemFallback::Never => false,
-            FontSystemFallback::Always => true,
-            FontSystemFallback::Auto => needs.needs_unicode || fallbacks_need_system,
-        };
+fn family_key(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
 
+fn is_generic_family(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "serif" | "sans-serif" | "sans" | "monospace" | "cursive" | "fantasy"
+    )
+}
+
+fn fallback_style_preference(config: &Config) -> FontStylePreference {
+    let family = config.font.family.trim().to_ascii_lowercase();
+    if matches!(family.as_str(), "serif") || family.contains("serif") {
+        FontStylePreference::Serif
+    } else {
+        FontStylePreference::Sans
+    }
+}
+
+fn normalize_repo_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+fn build_repo_key_index(state: &NotofontsState) -> HashMap<String, String> {
+    let mut index = HashMap::new();
+    for key in state.0.keys() {
+        index.insert(normalize_repo_key(key), key.clone());
+    }
+    index
+}
+
+fn is_cjk_script(script: Script) -> bool {
+    matches!(
+        script,
+        Script::Han | Script::Hiragana | Script::Katakana | Script::Hangul | Script::Bopomofo
+    )
+}
+
+fn script_repo_key(script: Script, index: &HashMap<String, String>) -> Option<String> {
+    match script {
+        Script::Common | Script::Inherited | Script::Unknown => return None,
+        Script::Latin | Script::Greek | Script::Cyrillic => {
+            return Some("latin-greek-cyrillic".to_string())
+        }
+        _ => {}
+    }
+    if is_cjk_script(script) {
+        return None;
+    }
+    let name = script.full_name();
+    let normalized = normalize_repo_key(name);
+    index.get(&normalized).cloned()
+}
+
+fn parse_cjk_region_from_locale(value: &str) -> Option<CjkRegion> {
+    let raw = value.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let mut base = raw.to_ascii_lowercase();
+    if let Some(pos) = base.find(['.', '@']) {
+        base.truncate(pos);
+    }
+    let normalized = base.replace('-', "_");
+    let parts = normalized
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+    match parts[0] {
+        "ja" => return Some(CjkRegion::Jp),
+        "ko" => return Some(CjkRegion::Kr),
+        "zh" => {
+            if parts.iter().any(|part| matches!(*part, "hk" | "mo")) {
+                return Some(CjkRegion::Hk);
+            }
+            if parts.contains(&"tw") {
+                return Some(CjkRegion::Tc);
+            }
+            if parts.contains(&"hant") {
+                return Some(CjkRegion::Tc);
+            }
+            if parts.iter().any(|part| matches!(*part, "cn" | "sg")) {
+                return Some(CjkRegion::Sc);
+            }
+            if parts.contains(&"hans") {
+                return Some(CjkRegion::Sc);
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+fn locale_cjk_region() -> Option<CjkRegion> {
+    for key in ["LC_ALL", "LC_CTYPE", "LANG"] {
+        if let Ok(value) = env::var(key) {
+            if let Some(region) = parse_cjk_region_from_locale(&value) {
+                return Some(region);
+            }
+        }
+    }
+    None
+}
+
+fn push_cjk_region(out: &mut Vec<CjkRegion>, seen: &mut HashSet<CjkRegion>, region: CjkRegion) {
+    if seen.insert(region) {
+        out.push(region);
+    }
+}
+
+fn collect_cjk_regions(config: &Config, needs: &FontFallbackNeeds) -> Vec<CjkRegion> {
+    if !needs.needs_cjk {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+
+    if needs.scripts.contains(&Script::Hiragana) || needs.scripts.contains(&Script::Katakana) {
+        push_cjk_region(&mut out, &mut seen, CjkRegion::Jp);
+    }
+    if needs.scripts.contains(&Script::Hangul) {
+        push_cjk_region(&mut out, &mut seen, CjkRegion::Kr);
+    }
+    if needs.scripts.contains(&Script::Bopomofo) {
+        push_cjk_region(&mut out, &mut seen, CjkRegion::Tc);
+    }
+
+    if needs.scripts.contains(&Script::Han) || out.is_empty() {
+        let region = match config.font.cjk_region {
+            CjkRegion::Auto => locale_cjk_region().unwrap_or(CjkRegion::Sc),
+            other => other,
+        };
+        push_cjk_region(&mut out, &mut seen, region);
+    }
+
+    out
+}
+
+fn cjk_region_families(region: CjkRegion) -> &'static [&'static str] {
+    match region {
+        CjkRegion::Sc => AUTO_FALLBACK_CJK_SC,
+        CjkRegion::Tc => AUTO_FALLBACK_CJK_TC,
+        CjkRegion::Hk => AUTO_FALLBACK_CJK_HK,
+        CjkRegion::Jp => AUTO_FALLBACK_CJK_JP,
+        CjkRegion::Kr => AUTO_FALLBACK_CJK_KR,
+        CjkRegion::Auto => AUTO_FALLBACK_CJK_SC,
+    }
+}
+
+fn cjk_region_urls(region: CjkRegion) -> &'static [&'static str] {
+    match region {
+        CjkRegion::Sc => NOTO_CJK_SC_URLS,
+        CjkRegion::Tc => NOTO_CJK_TC_URLS,
+        CjkRegion::Hk => NOTO_CJK_HK_URLS,
+        CjkRegion::Jp => NOTO_CJK_JP_URLS,
+        CjkRegion::Kr => NOTO_CJK_KR_URLS,
+        CjkRegion::Auto => NOTO_CJK_SC_URLS,
+    }
+}
+
+fn cjk_region_filename(region: CjkRegion) -> &'static str {
+    match region {
+        CjkRegion::Sc => "NotoSansCJKsc-Regular.otf",
+        CjkRegion::Tc => "NotoSansCJKtc-Regular.otf",
+        CjkRegion::Hk => "NotoSansCJKhk-Regular.otf",
+        CjkRegion::Jp => "NotoSansCJKjp-Regular.otf",
+        CjkRegion::Kr => "NotoSansCJKkr-Regular.otf",
+        CjkRegion::Auto => "NotoSansCJKsc-Regular.otf",
+    }
+}
+
+fn choose_family_name(
+    families: &HashMap<String, NotofontsFamily>,
+    style: FontStylePreference,
+) -> Option<String> {
+    let mut candidates = families
+        .iter()
+        .filter(|(_, info)| info.latest_release.is_some() || !info.files.is_empty())
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return None;
+    }
+    let (primary, secondary, extra) = match style {
+        FontStylePreference::Sans => ("Noto Sans", "Sans", "Kufi"),
+        FontStylePreference::Serif => ("Noto Serif", "Serif", "Naskh"),
+    };
+    for pattern in [primary, secondary, extra] {
+        if let Some(name) = candidates
+            .iter()
+            .find(|name| name.contains(pattern))
+            .cloned()
+        {
+            return Some(name);
+        }
+    }
+    candidates.sort();
+    Some(candidates[0].clone())
+}
+
+fn tag_from_release_url(url: &str) -> Option<String> {
+    url.rsplit('/').next().map(|v| v.to_string())
+}
+
+fn repo_from_release_url(url: &str) -> Option<String> {
+    let suffix = url.split("github.com/").nth(1)?;
+    let mut parts = suffix.split('/');
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some(format!("{owner}/{repo}"))
+}
+
+fn score_font_path(path: &str) -> Option<i32> {
+    let lower = path.to_ascii_lowercase();
+    let ext_score = if lower.ends_with(".ttf") {
+        100
+    } else if lower.ends_with(".otf") {
+        80
+    } else {
+        return None;
+    };
+    let mut score = ext_score;
+    if lower.contains("/full/") {
+        score += 60;
+    }
+    if lower.contains("/hinted/") {
+        score += 45;
+    }
+    if lower.contains("/googlefonts/") {
+        score += 30;
+    }
+    if lower.contains("/unhinted/") {
+        score += 10;
+    }
+    if lower.contains("regular") {
+        score += 200;
+    }
+    if lower.contains("italic") {
+        score -= 120;
+    }
+    if lower.contains("variable") || lower.contains('[') {
+        score -= 20;
+    }
+    if lower.contains("slim") {
+        score -= 10;
+    }
+    Some(score)
+}
+
+fn pick_best_font_file(files: &[String]) -> Option<String> {
+    let mut best: Option<(i32, &String)> = None;
+    for file in files {
+        let Some(score) = score_font_path(file) else {
+            continue;
+        };
+        match best {
+            None => best = Some((score, file)),
+            Some((best_score, best_file)) => {
+                if score > best_score || (score == best_score && file.len() < best_file.len()) {
+                    best = Some((score, file));
+                }
+            }
+        }
+    }
+    best.map(|(_, file)| file.clone())
+}
+
+fn resolve_script_font_plan(config: &Config, needs: &FontFallbackNeeds) -> Result<ScriptFontPlan> {
+    if needs.scripts.is_empty() || !needs.needs_unicode {
+        return Ok(ScriptFontPlan::default());
+    }
+    let state = load_notofonts_state(force_update_enabled(config))?;
+    let index = build_repo_key_index(&state);
+    let style = fallback_style_preference(config);
+    let mut families = Vec::new();
+    let mut downloads = Vec::new();
+    let mut seen_repo = HashSet::new();
+    let mut seen_family = HashSet::new();
+    let mut seen_download = HashSet::new();
+
+    let mut scripts = needs.scripts.iter().copied().collect::<Vec<_>>();
+    scripts.sort_by_key(|script| script.full_name().to_string());
+    for script in scripts {
+        let Some(repo_key) = script_repo_key(script, &index) else {
+            continue;
+        };
+        if !seen_repo.insert(repo_key.clone()) {
+            continue;
+        }
+        let Some(repo) = state.0.get(&repo_key) else {
+            continue;
+        };
+        let Some(family) = choose_family_name(&repo.families, style) else {
+            continue;
+        };
+        let Some(family_info) = repo.families.get(&family) else {
+            continue;
+        };
+        let Some(file_path) = pick_best_font_file(&family_info.files) else {
+            continue;
+        };
+        let repo_name = if file_path.starts_with("fonts/") {
+            NOTOFONTS_FILES_REPO.to_string()
+        } else {
+            family_info
+                .latest_release
+                .as_ref()
+                .and_then(|release| repo_from_release_url(&release.url))
+                .unwrap_or_else(|| format!("notofonts/{repo_key}"))
+        };
+        let raw_name = Path::new(&file_path)
+            .file_name()
+            .and_then(|value| value.to_str());
+        let Some(raw_name) = raw_name else {
+            continue;
+        };
+        let filename = format!("{}__{}", repo_name.replace('/', "_"), raw_name);
+        let tag = if repo_name == NOTOFONTS_FILES_REPO {
+            None
+        } else {
+            family_info
+                .latest_release
+                .as_ref()
+                .and_then(|release| tag_from_release_url(&release.url))
+        };
+        if seen_family.insert(family.clone()) {
+            families.push(family.clone());
+        }
+        let download_key = format!("{repo_name}|{file_path}");
+        if seen_download.insert(download_key) {
+            downloads.push(ScriptDownload {
+                family,
+                repo: repo_name,
+                file_path,
+                filename,
+                tag,
+            });
+        }
+    }
+
+    Ok(ScriptFontPlan {
+        families,
+        downloads,
+    })
+}
+
+fn build_font_families(
+    config: &Config,
+    needs: &FontFallbackNeeds,
+    script_families: &[String],
+) -> Vec<String> {
     let mut families = Vec::new();
     let mut seen = HashSet::new();
     push_family(&mut families, &mut seen, &config.font.family);
     for name in &config.font.fallbacks {
         push_family(&mut families, &mut seen, name);
     }
+    for name in script_families {
+        push_family(&mut families, &mut seen, name);
+    }
 
-    if add_nf {
+    if needs.needs_nf {
         for name in AUTO_FALLBACK_NF {
             push_family(&mut families, &mut seen, name);
         }
     }
-    if add_unicode {
+    if needs.needs_cjk {
         for name in AUTO_FALLBACK_CJK {
             push_family(&mut families, &mut seen, name);
         }
+    }
+    if needs.needs_unicode {
         for name in AUTO_FALLBACK_GLOBAL {
             push_family(&mut families, &mut seen, name);
         }
+    }
+    if needs.needs_emoji {
         for name in AUTO_FALLBACK_EMOJI {
             push_family(&mut families, &mut seen, name);
         }
     }
 
+    families
+}
+
+fn family_requires_system(name: &str, app_families: &HashSet<String>) -> bool {
+    if is_generic_family(name) {
+        return true;
+    }
+    let key = family_key(name);
+    !app_families.contains(&key)
+}
+
+fn needs_system_fonts(
+    config: &Config,
+    app_families: &HashSet<String>,
+    families: &[String],
+) -> bool {
+    match config.font.system_fallback {
+        FontSystemFallback::Never => return false,
+        FontSystemFallback::Always => return true,
+        FontSystemFallback::Auto => {}
+    }
+    let mut needs = false;
+    if config.font.file.is_none() && family_requires_system(&config.font.family, app_families) {
+        needs = true;
+    }
+    if !needs {
+        for name in families {
+            if config.font.file.is_some() && name.eq_ignore_ascii_case(&config.font.family) {
+                continue;
+            }
+            if family_requires_system(name, app_families) {
+                needs = true;
+                break;
+            }
+        }
+    }
+    needs
+}
+
+fn build_font_plan(
+    config: &Config,
+    needs: &FontFallbackNeeds,
+    app_families: &HashSet<String>,
+    script_families: &[String],
+) -> FontPlan {
+    let families = build_font_families(config, needs, script_families);
     let font_family = families.join(", ");
-    let needs_jetbrains_font = families.iter().any(|name| is_jetbrains_mono(name));
+    let needs_system_fonts = needs_system_fonts(config, app_families, &families);
     FontPlan {
         font_family,
         needs_system_fonts,
-        needs_jetbrains_font,
-        needs_symbols_font: families
-            .iter()
-            .any(|name| is_symbols_nerd_font_mono(name)),
     }
 }
 
-fn is_jetbrains_mono(family: &str) -> bool {
-    family.eq_ignore_ascii_case("JetBrains Mono")
-}
-
-fn is_symbols_nerd_font_mono(family: &str) -> bool {
-    family.eq_ignore_ascii_case("Symbols Nerd Font Mono")
-}
-
-fn is_builtin_font(family: &str) -> bool {
-    is_jetbrains_mono(family) || is_symbols_nerd_font_mono(family)
-}
-
-fn fallbacks_require_system_fonts(fallbacks: &[String]) -> bool {
-    fallbacks.iter().any(|name| !is_builtin_font(name))
-}
-
-fn build_fontdb(
-    config: &Config,
-    needs_system_fonts: bool,
-    needs_jetbrains_font: bool,
-    needs_symbols_font: bool,
-) -> Result<usvg::fontdb::Database> {
+fn build_fontdb(config: &Config, needs_system_fonts: bool) -> Result<usvg::fontdb::Database> {
     let mut fontdb = usvg::fontdb::Database::new();
-    if needs_system_fonts {
-        fontdb.load_system_fonts();
-    }
     if let Some(font_file) = &config.font.file {
         let bytes = std::fs::read(font_file)?;
         fontdb.load_font_data(bytes);
-    } else if is_jetbrains_mono(&config.font.family) {
-        if config.font.ligatures {
-            fontdb.load_font_data(JETBRAINS_MONO_REGULAR.to_vec());
-        } else {
-            fontdb.load_font_data(JETBRAINS_MONO_NL.to_vec());
+    }
+    for dir in resolve_font_dirs(config)? {
+        if dir.is_dir() {
+            fontdb.load_fonts_dir(dir);
         }
     }
-    let using_custom_jetbrains =
-        config.font.file.is_some() && is_jetbrains_mono(&config.font.family);
-    if needs_jetbrains_font && !using_custom_jetbrains && !is_jetbrains_mono(&config.font.family)
-    {
-        let bytes = if config.font.ligatures {
-            JETBRAINS_MONO_REGULAR.to_vec()
-        } else {
-            JETBRAINS_MONO_NL.to_vec()
-        };
-        fontdb.load_font_data(bytes);
-    }
-    let using_custom_symbols =
-        config.font.file.is_some() && is_symbols_nerd_font_mono(&config.font.family);
-    if needs_symbols_font && !using_custom_symbols {
-        fontdb.load_font_data(SYMBOLS_NERD_FONT_MONO_REGULAR.to_vec());
+    if needs_system_fonts {
+        fontdb.load_system_fonts();
     }
     Ok(fontdb)
+}
+
+fn resolve_font_dirs(config: &Config) -> Result<Vec<PathBuf>> {
+    let raw = env::var("CRYOSNAP_FONT_DIRS").ok();
+    if let Some(raw) = raw {
+        return parse_font_dir_list(&raw);
+    }
+    if !config.font.dirs.is_empty() {
+        return Ok(config
+            .font
+            .dirs
+            .iter()
+            .filter_map(|value| expand_home_dir(value))
+            .collect());
+    }
+    Ok(vec![default_font_dir()?])
+}
+
+fn parse_font_dir_list(raw: &str) -> Result<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    for part in raw.split(',') {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(path) = expand_home_dir(trimmed) {
+            out.push(path);
+        }
+    }
+    Ok(out)
+}
+
+fn expand_home_dir(value: &str) -> Option<PathBuf> {
+    if value == "~" || value.starts_with("~/") || value.starts_with("~\\") {
+        let home = home_dir()?;
+        let rest = value.trim_start_matches('~');
+        return Some(if rest.is_empty() {
+            home
+        } else {
+            home.join(rest.trim_start_matches(['/', '\\']))
+        });
+    }
+    Some(PathBuf::from(value))
+}
+
+fn default_font_dir() -> Result<PathBuf> {
+    Ok(default_app_dir()?.join("fonts"))
+}
+
+fn default_app_dir() -> Result<PathBuf> {
+    if let Ok(path) = env::var("CRYOSNAP_HOME") {
+        return Ok(PathBuf::from(path));
+    }
+    let home = home_dir()
+        .ok_or_else(|| Error::InvalidInput("unable to resolve home directory".to_string()))?;
+    Ok(home.join(".cryosnap"))
+}
+
+fn home_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        if let Some(path) = env::var_os("USERPROFILE") {
+            return Some(PathBuf::from(path));
+        }
+        if let (Some(drive), Some(path)) = (env::var_os("HOMEDRIVE"), env::var_os("HOMEPATH")) {
+            return Some(PathBuf::from(drive).join(path));
+        }
+        None
+    } else {
+        env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+fn collect_font_families(db: &usvg::fontdb::Database) -> HashSet<String> {
+    let mut families = HashSet::new();
+    for face in db.faces() {
+        for (family, _) in &face.families {
+            families.insert(family_key(family));
+        }
+    }
+    families
+}
+
+fn load_app_font_families(config: &Config) -> Result<HashSet<String>> {
+    let mut fontdb = usvg::fontdb::Database::new();
+    for dir in resolve_font_dirs(config)? {
+        if dir.is_dir() {
+            fontdb.load_fonts_dir(dir);
+        }
+    }
+    Ok(collect_font_families(&fontdb))
+}
+
+fn load_system_font_families() -> HashSet<String> {
+    let mut fontdb = usvg::fontdb::Database::new();
+    fontdb.load_system_fonts();
+    collect_font_families(&fontdb)
+}
+
+fn auto_download_enabled(config: &Config) -> bool {
+    if let Ok(value) = env::var("CRYOSNAP_FONT_AUTO_DOWNLOAD") {
+        let value = value.trim().to_ascii_lowercase();
+        return !(value == "0" || value == "false" || value == "no" || value == "off");
+    }
+    config.font.auto_download
+}
+
+fn force_update_enabled(config: &Config) -> bool {
+    if let Ok(value) = env::var("CRYOSNAP_FONT_FORCE_UPDATE") {
+        let value = value.trim().to_ascii_lowercase();
+        return !(value == "0" || value == "false" || value == "no" || value == "off");
+    }
+    config.font.force_update
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct NotofontsState(HashMap<String, NotofontsRepo>);
+
+#[derive(Debug, Clone, Deserialize)]
+struct NotofontsRepo {
+    #[serde(default)]
+    families: HashMap<String, NotofontsFamily>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct NotofontsFamily {
+    #[serde(default)]
+    latest_release: Option<NotofontsRelease>,
+    #[serde(default)]
+    files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct NotofontsRelease {
+    url: String,
+}
+
+static NOTOFONTS_STATE: Lazy<Mutex<Option<Arc<NotofontsState>>>> = Lazy::new(|| Mutex::new(None));
+static HTTP_AGENT: Lazy<ureq::Agent> = Lazy::new(|| {
+    ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(600))
+        .build()
+});
+
+fn github_proxy_candidates() -> Vec<String> {
+    if let Ok(value) = env::var("CRYOSNAP_GITHUB_PROXY") {
+        let parts = value
+            .split(',')
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>();
+        if !parts.is_empty() {
+            return parts;
+        }
+    }
+    DEFAULT_GITHUB_PROXIES
+        .iter()
+        .map(|v| v.to_string())
+        .collect()
+}
+
+fn cache_dir() -> Result<PathBuf> {
+    Ok(default_app_dir()?.join("cache"))
+}
+
+fn apply_github_proxy(url: &str, proxy: &str) -> String {
+    let mut base = proxy.trim().to_string();
+    if !base.ends_with('/') {
+        base.push('/');
+    }
+    format!("{base}{url}")
+}
+
+enum FetchOutcome {
+    Ok(Box<ureq::Response>, Option<String>),
+    NotModified,
+}
+
+fn build_github_candidates() -> Vec<Option<String>> {
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+
+    candidates.push(None);
+    for proxy in github_proxy_candidates() {
+        if seen.insert(proxy.clone()) {
+            candidates.push(Some(proxy));
+        }
+    }
+    candidates
+}
+
+fn looks_like_json(bytes: &[u8]) -> bool {
+    for &b in bytes {
+        if !b.is_ascii_whitespace() {
+            return b == b'{' || b == b'[';
+        }
+    }
+    false
+}
+
+fn fetch_with_candidates(url: &str, headers: &[(&str, &str)]) -> Result<FetchOutcome> {
+    let candidates = build_github_candidates();
+
+    let mut last_error: Option<String> = None;
+    for proxy_opt in candidates {
+        let target = match &proxy_opt {
+            Some(proxy) => apply_github_proxy(url, proxy),
+            None => url.to_string(),
+        };
+        let mut req = HTTP_AGENT
+            .get(&target)
+            .set("User-Agent", "cryosnap/auto-font");
+        for (key, value) in headers {
+            req = req.set(key, value);
+        }
+        match req.call() {
+            Ok(resp) => {
+                return Ok(FetchOutcome::Ok(Box::new(resp), proxy_opt.clone()));
+            }
+            Err(ureq::Error::Status(304, _)) => return Ok(FetchOutcome::NotModified),
+            Err(err) => {
+                last_error = Some(format!("{err}"));
+                continue;
+            }
+        }
+    }
+    Err(Error::Render(format!(
+        "download failed: {}",
+        last_error.unwrap_or_else(|| "unknown error".to_string())
+    )))
+}
+
+fn fetch_bytes_with_cache(url: &str, cache_name: &str, force_update: bool) -> Result<Vec<u8>> {
+    let cache_dir = cache_dir()?;
+    let data_path = cache_dir.join(cache_name);
+    let etag_path = cache_dir.join(format!("{cache_name}.etag"));
+    let mut headers: Vec<(&str, &str)> = Vec::new();
+    let mut etag_holder: Option<String> = None;
+    if data_path.exists() && !force_update {
+        if let Ok(etag) = fs::read_to_string(&etag_path) {
+            let tag = etag.trim().to_string();
+            if !tag.is_empty() {
+                etag_holder = Some(tag);
+            }
+        }
+    }
+    if let Some(tag) = etag_holder.as_ref() {
+        headers.push(("If-None-Match", tag.as_str()));
+    }
+    let candidates = build_github_candidates();
+    let mut last_error: Option<String> = None;
+    for proxy_opt in candidates {
+        let target = match &proxy_opt {
+            Some(proxy) => apply_github_proxy(url, proxy),
+            None => url.to_string(),
+        };
+        let mut req = HTTP_AGENT
+            .get(&target)
+            .set("User-Agent", "cryosnap/auto-font");
+        for (key, value) in &headers {
+            req = req.set(key, value);
+        }
+        match req.call() {
+            Ok(resp) => {
+                let etag_value = resp.header("ETag").map(|v| v.to_string());
+                let mut reader = resp.into_reader();
+                let mut buf = Vec::new();
+                reader.read_to_end(&mut buf)?;
+                if !looks_like_json(&buf) {
+                    last_error = Some("invalid response".to_string());
+                    continue;
+                }
+                if let Some(parent) = data_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(&data_path, &buf)?;
+                if let Some(etag) = etag_value {
+                    let _ = fs::write(&etag_path, etag.as_bytes());
+                }
+                return Ok(buf);
+            }
+            Err(ureq::Error::Status(304, _)) => {
+                if data_path.exists() {
+                    let cached = fs::read(&data_path)?;
+                    if looks_like_json(&cached) {
+                        return Ok(cached);
+                    }
+                    let _ = fs::remove_file(&data_path);
+                    let _ = fs::remove_file(&etag_path);
+                }
+                last_error = Some("font state cache missing".to_string());
+                continue;
+            }
+            Err(err) => {
+                last_error = Some(format!("{err}"));
+                continue;
+            }
+        }
+    }
+    if data_path.exists() {
+        let cached = fs::read(&data_path)?;
+        if looks_like_json(&cached) {
+            return Ok(cached);
+        }
+        let _ = fs::remove_file(&data_path);
+        let _ = fs::remove_file(&etag_path);
+    }
+    Err(Error::Render(format!(
+        "download failed: {}",
+        last_error.unwrap_or_else(|| "unknown error".to_string())
+    )))
+}
+
+fn download_url_with_etag(url: &str, target: &Path, force_update: bool) -> Result<bool> {
+    let etag_path = target.with_extension(format!(
+        "{}.etag",
+        target
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("font")
+    ));
+    let mut headers: Vec<(&str, &str)> = Vec::new();
+    let mut etag_holder: Option<String> = None;
+    if target.exists() && !force_update {
+        if let Ok(etag) = fs::read_to_string(&etag_path) {
+            let tag = etag.trim().to_string();
+            if !tag.is_empty() {
+                etag_holder = Some(tag);
+            }
+        }
+    }
+    if let Some(tag) = etag_holder.as_ref() {
+        headers.push(("If-None-Match", tag.as_str()));
+    }
+    match fetch_with_candidates(url, &headers)? {
+        FetchOutcome::Ok(resp, _proxy) => {
+            let etag_value = resp.header("ETag").map(|v| v.to_string());
+            let mut reader = resp.into_reader();
+            let temp = target.with_extension("download");
+            let mut file = fs::File::create(&temp)?;
+            std::io::copy(&mut reader, &mut file)?;
+            file.sync_all()?;
+            fs::rename(&temp, target)?;
+            if let Some(etag) = etag_value {
+                let _ = fs::write(&etag_path, etag.as_bytes());
+            }
+            Ok(true)
+        }
+        FetchOutcome::NotModified => Ok(false),
+    }
+}
+
+fn load_notofonts_state(force_update: bool) -> Result<Arc<NotofontsState>> {
+    if !force_update {
+        if let Ok(guard) = NOTOFONTS_STATE.lock() {
+            if let Some(state) = guard.as_ref() {
+                return Ok(state.clone());
+            }
+        }
+    }
+    let bytes = fetch_bytes_with_cache(NOTOFONTS_STATE_URL, "notofonts_state.json", force_update)?;
+    let state: NotofontsState = serde_json::from_slice(&bytes)
+        .map_err(|err| Error::Render(format!("font state parse: {err}")))?;
+    let state = Arc::new(state);
+    if !force_update {
+        if let Ok(mut guard) = NOTOFONTS_STATE.lock() {
+            *guard = Some(state.clone());
+        }
+    }
+    Ok(state)
+}
+
+struct FontPackage {
+    id: &'static str,
+    family: &'static str,
+    filename: &'static str,
+    url: &'static str,
+    download_sha256: &'static str,
+    file_sha256: &'static str,
+    archive_entry: Option<&'static str>,
+}
+
+const FONT_PACKAGE_NF: FontPackage = FontPackage {
+    id: "symbols-nerd-font-mono",
+    family: "Symbols Nerd Font Mono",
+    filename: "SymbolsNerdFontMono-Regular.ttf",
+    url:
+        "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/NerdFontsSymbolsOnly.zip",
+    download_sha256: "bc59c2ea74d022a6262ff9e372fde5c36cd5ae3f82a567941489ecfab4f03d66",
+    file_sha256: "6f7e339af33bde250a4d7360a3176ab1ffe4e99c00eef0d71b4c322364c595f3",
+    archive_entry: Some("SymbolsNerdFontMono-Regular.ttf"),
+};
+
+fn ensure_fonts_available(
+    config: &Config,
+    needs: &FontFallbackNeeds,
+    script_plan: &ScriptFontPlan,
+) -> Result<()> {
+    if !auto_download_enabled(config) {
+        return Ok(());
+    }
+    let force_update = force_update_enabled(config);
+    if !needs.needs_nf && !needs.needs_cjk && !needs.needs_emoji && script_plan.downloads.is_empty()
+    {
+        return Ok(());
+    }
+    let font_dirs = resolve_font_dirs(config)?;
+    let Some(primary_dir) = font_dirs.first() else {
+        return Ok(());
+    };
+    let app_families = load_app_font_families(config).unwrap_or_default();
+    let allow_system = !matches!(config.font.system_fallback, FontSystemFallback::Never);
+    let system_families = if allow_system {
+        load_system_font_families()
+    } else {
+        HashSet::new()
+    };
+
+    fs::create_dir_all(primary_dir)?;
+
+    for download in &script_plan.downloads {
+        let app_has = app_families.contains(&family_key(&download.family));
+        let system_has = allow_system && system_families.contains(&family_key(&download.family));
+        if system_has && !app_has {
+            continue;
+        }
+        if app_has {
+            if !force_update {
+                continue;
+            }
+            let target = primary_dir.join(&download.filename);
+            if !target.exists() {
+                continue;
+            }
+        }
+        if let Err(err) = download_notofonts_file(download, primary_dir, force_update) {
+            eprintln!(
+                "cryosnap: font download failed for {}: {}",
+                download.family, err
+            );
+        }
+    }
+
+    if needs.needs_nf
+        && !any_family_present(&[FONT_PACKAGE_NF.family], &app_families)
+        && !(allow_system && any_family_present(&[FONT_PACKAGE_NF.family], &system_families))
+    {
+        if let Err(err) = download_font_package(&FONT_PACKAGE_NF, primary_dir) {
+            eprintln!(
+                "cryosnap: font download failed for {}: {}",
+                FONT_PACKAGE_NF.id, err
+            );
+        }
+    }
+
+    if needs.needs_cjk {
+        let cjk_regions = collect_cjk_regions(config, needs);
+        for region in cjk_regions {
+            let families = cjk_region_families(region);
+            let app_has = any_family_present(families, &app_families);
+            let system_has = allow_system && any_family_present(families, &system_families);
+            if system_has && !app_has {
+                continue;
+            }
+            let filename = cjk_region_filename(region);
+            let target = primary_dir.join(filename);
+            if app_has {
+                if !force_update {
+                    continue;
+                }
+                if !target.exists() {
+                    continue;
+                }
+            }
+            if let Err(err) =
+                download_raw_font(cjk_region_urls(region), primary_dir, filename, force_update)
+            {
+                eprintln!("cryosnap: font download failed for cjk: {}", err);
+            }
+        }
+    }
+
+    if needs.needs_emoji {
+        let app_has = any_family_present(AUTO_FALLBACK_EMOJI, &app_families);
+        let system_has = allow_system && any_family_present(AUTO_FALLBACK_EMOJI, &system_families);
+        if !system_has || app_has {
+            let filename = "NotoColorEmoji.ttf";
+            let target = primary_dir.join(filename);
+            if !app_has || (force_update && target.exists()) {
+                if let Err(err) =
+                    download_raw_font(NOTO_EMOJI_URLS, primary_dir, filename, force_update)
+                {
+                    eprintln!("cryosnap: font download failed for emoji: {}", err);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn any_family_present(families: &[&str], set: &HashSet<String>) -> bool {
+    families.iter().any(|name| set.contains(&family_key(name)))
+}
+
+fn download_raw_font(urls: &[&str], dir: &Path, filename: &str, force_update: bool) -> Result<()> {
+    let target = dir.join(filename);
+    let mut last_error: Option<Error> = None;
+    for url in urls {
+        match download_url_with_etag(url, &target, force_update) {
+            Ok(_) => return Ok(()),
+            Err(err) => last_error = Some(err),
+        }
+    }
+    Err(last_error
+        .unwrap_or_else(|| Error::Render("font download failed: no available urls".to_string())))
+}
+
+fn download_notofonts_file(
+    download: &ScriptDownload,
+    dir: &Path,
+    force_update: bool,
+) -> Result<()> {
+    let target = dir.join(&download.filename);
+    if !force_update && target.exists() {
+        return Ok(());
+    }
+    let mut refs = vec!["main".to_string(), "master".to_string()];
+    if let Some(tag) = &download.tag {
+        if !tag.is_empty() {
+            refs.push(tag.clone());
+        }
+    }
+    let mut last_error: Option<Error> = None;
+    for reference in refs {
+        let url = format!(
+            "https://raw.githubusercontent.com/{}/{}/{}",
+            download.repo, reference, download.file_path
+        );
+        match download_url_with_etag(&url, &target, force_update) {
+            Ok(_) => return Ok(()),
+            Err(err) => last_error = Some(err),
+        }
+    }
+    Err(last_error
+        .unwrap_or_else(|| Error::Render("font download failed: no available refs".to_string())))
+}
+
+fn download_url_to_file(url: &str, target: &Path) -> Result<()> {
+    match fetch_with_candidates(url, &[])? {
+        FetchOutcome::Ok(resp, _proxy) => {
+            let mut reader = resp.into_reader();
+            let mut file = fs::File::create(target)?;
+            std::io::copy(&mut reader, &mut file)?;
+            file.sync_all()?;
+            Ok(())
+        }
+        FetchOutcome::NotModified => Ok(()),
+    }
+}
+
+fn download_zip_with_candidates(url: &str, target: &Path) -> Result<()> {
+    let candidates = build_github_candidates();
+    let mut last_error: Option<String> = None;
+    for proxy_opt in candidates {
+        let target_url = match &proxy_opt {
+            Some(proxy) => apply_github_proxy(url, proxy),
+            None => url.to_string(),
+        };
+        let req = HTTP_AGENT
+            .get(&target_url)
+            .set("User-Agent", "cryosnap/auto-font");
+        match req.call() {
+            Ok(resp) => {
+                let temp = target.with_extension("download");
+                let mut reader = resp.into_reader();
+                let mut file = fs::File::create(&temp)?;
+                std::io::copy(&mut reader, &mut file)?;
+                file.sync_all()?;
+                if let Err(err) = validate_zip_archive(&temp) {
+                    last_error = Some(err.to_string());
+                    let _ = fs::remove_file(&temp);
+                    continue;
+                }
+                fs::rename(&temp, target)?;
+                return Ok(());
+            }
+            Err(ureq::Error::Status(status, _)) => {
+                last_error = Some(format!("status {status}"));
+                continue;
+            }
+            Err(err) => {
+                last_error = Some(format!("{err}"));
+                continue;
+            }
+        }
+    }
+    Err(Error::Render(format!(
+        "download failed: {}",
+        last_error.unwrap_or_else(|| "unknown error".to_string())
+    )))
+}
+
+fn validate_zip_archive(path: &Path) -> Result<()> {
+    let file = fs::File::open(path)?;
+    match zip::ZipArchive::new(file) {
+        Ok(_) => Ok(()),
+        Err(err) => Err(Error::Render(format!("zip read: {err}"))),
+    }
+}
+
+fn download_font_package(pkg: &FontPackage, dir: &Path) -> Result<()> {
+    let target = dir.join(pkg.filename);
+    if verify_sha256(&target, pkg.file_sha256)? {
+        return Ok(());
+    }
+    let temp = dir.join(format!("{}.download", pkg.filename));
+    if pkg.archive_entry.is_some() {
+        download_zip_with_candidates(pkg.url, &temp)?;
+    } else {
+        download_url_to_file(pkg.url, &temp)?;
+    }
+    if !verify_sha256(&temp, pkg.download_sha256)? {
+        let _ = fs::remove_file(&temp);
+        return Err(Error::Render(format!(
+            "font checksum mismatch for {}",
+            pkg.id
+        )));
+    }
+    if let Some(entry) = pkg.archive_entry {
+        extract_zip_entry(&temp, entry, &target)?;
+        let _ = fs::remove_file(&temp);
+    } else {
+        fs::rename(&temp, &target)?;
+    }
+    if !verify_sha256(&target, pkg.file_sha256)? {
+        return Err(Error::Render(format!(
+            "font checksum mismatch for {}",
+            pkg.id
+        )));
+    }
+    Ok(())
+}
+
+fn extract_zip_entry(archive_path: &Path, entry: &str, target: &Path) -> Result<()> {
+    let file = fs::File::open(archive_path)?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|err| Error::Render(format!("zip read: {err}")))?;
+    let mut entry_file = archive
+        .by_name(entry)
+        .map_err(|err| Error::Render(format!("zip entry {entry}: {err}")))?;
+    let mut out = fs::File::create(target)?;
+    std::io::copy(&mut entry_file, &mut out)?;
+    out.sync_all()?;
+    Ok(())
+}
+
+fn verify_sha256(path: &Path, expected: &str) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    if expected.trim().is_empty() {
+        return Ok(true);
+    }
+    let actual = sha256_hex(path)?;
+    Ok(actual.eq_ignore_ascii_case(expected.trim()))
+}
+
+fn sha256_hex(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let read = file.read(&mut buf)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        out.push_str(&format!("{:02x}", byte));
+    }
+    Ok(out)
 }
 
 fn pixmap_to_webp(pixmap: &tiny_skia::Pixmap) -> Result<Vec<u8>> {
@@ -2474,7 +3619,7 @@ fn escape_attr(text: &str) -> String {
     escape_text(text).replace('"', "&quot;")
 }
 
-fn svg_font_face_css(config: &Config, font_plan: &FontPlan) -> Result<Option<String>> {
+fn svg_font_face_css(config: &Config) -> Result<Option<String>> {
     let mut rules = Vec::new();
     let mut push_rule = |family: &str, data: Vec<u8>, format: &str, mime: &str| {
         let encoded = base64::engine::general_purpose::STANDARD.encode(data);
@@ -2486,8 +3631,6 @@ fn svg_font_face_css(config: &Config, font_plan: &FontPlan) -> Result<Option<Str
             format
         ));
     };
-    let mut added_jetbrains = false;
-
     if let Some(font_file) = &config.font.file {
         let bytes = std::fs::read(font_file)?;
         let ext = Path::new(font_file)
@@ -2502,46 +3645,6 @@ fn svg_font_face_css(config: &Config, font_plan: &FontPlan) -> Result<Option<Str
             _ => ("truetype", "font/ttf"),
         };
         push_rule(&config.font.family, bytes, format, mime);
-        if is_jetbrains_mono(&config.font.family) {
-            added_jetbrains = true;
-        }
-    } else if is_jetbrains_mono(&config.font.family) {
-        if config.font.ligatures {
-            push_rule(
-                &config.font.family,
-                JETBRAINS_MONO_REGULAR.to_vec(),
-                "truetype",
-                "font/ttf",
-            );
-        } else {
-            push_rule(
-                &config.font.family,
-                JETBRAINS_MONO_NL.to_vec(),
-                "truetype",
-                "font/ttf",
-            );
-        }
-        added_jetbrains = true;
-    }
-
-    if font_plan.needs_jetbrains_font && !added_jetbrains {
-        let bytes = if config.font.ligatures {
-            JETBRAINS_MONO_REGULAR.to_vec()
-        } else {
-            JETBRAINS_MONO_NL.to_vec()
-        };
-        push_rule("JetBrains Mono", bytes, "truetype", "font/ttf");
-    }
-
-    let using_custom_symbols =
-        config.font.file.is_some() && is_symbols_nerd_font_mono(&config.font.family);
-    if font_plan.needs_symbols_font && !using_custom_symbols {
-        push_rule(
-            "Symbols Nerd Font Mono",
-            SYMBOLS_NERD_FONT_MONO_REGULAR.to_vec(),
-            "truetype",
-            "font/ttf",
-        );
     }
 
     if rules.is_empty() {
@@ -2551,14 +3654,10 @@ fn svg_font_face_css(config: &Config, font_plan: &FontPlan) -> Result<Option<Str
     }
 }
 
-static JETBRAINS_MONO_REGULAR: &[u8] = include_bytes!("../assets/JetBrainsMono-Regular.ttf");
-static JETBRAINS_MONO_NL: &[u8] = include_bytes!("../assets/JetBrainsMonoNL-Regular.ttf");
-static SYMBOLS_NERD_FONT_MONO_REGULAR: &[u8] =
-    include_bytes!("../assets/SymbolsNerdFontMono-Regular.ttf");
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
 
     #[test]
@@ -2661,15 +3760,92 @@ mod tests {
     #[test]
     fn svg_font_face_css_respects_family() {
         let mut cfg = Config::default();
-        cfg.font.family = "JetBrains Mono".to_string();
-        let plan = build_font_plan(&cfg, &[Line::default()], None);
-        let css = svg_font_face_css(&cfg, &plan).expect("css");
+        let path =
+            std::env::temp_dir().join(format!("cryosnap-font-test-{}.ttf", std::process::id()));
+        std::fs::write(&path, b"font").expect("write temp font");
+        cfg.font.family = "Custom".to_string();
+        cfg.font.file = Some(path.to_string_lossy().to_string());
+        let css = svg_font_face_css(&cfg).expect("css");
         assert!(css.is_some());
 
-        cfg.font.family = "Custom".to_string();
-        let plan = build_font_plan(&cfg, &[Line::default()], None);
-        let css = svg_font_face_css(&cfg, &plan).expect("css");
+        cfg.font.file = None;
+        let css = svg_font_face_css(&cfg).expect("css");
         assert!(css.is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn normalize_repo_key_strips_punct() {
+        assert_eq!(normalize_repo_key("N'Ko"), "nko");
+        assert_eq!(normalize_repo_key("Sign-Writing"), "signwriting");
+        assert_eq!(normalize_repo_key("Old Hungarian"), "oldhungarian");
+    }
+
+    #[test]
+    fn script_repo_key_maps_latin() {
+        let mut repos = HashMap::new();
+        repos.insert(
+            "latin-greek-cyrillic".to_string(),
+            NotofontsRepo {
+                families: HashMap::new(),
+            },
+        );
+        let state = NotofontsState(repos);
+        let index = build_repo_key_index(&state);
+        assert_eq!(
+            script_repo_key(Script::Latin, &index).as_deref(),
+            Some("latin-greek-cyrillic")
+        );
+    }
+
+    #[test]
+    fn tag_from_release_url_extracts() {
+        let url = "https://github.com/notofonts/devanagari/releases/tag/NotoSansDevanagari-v2.006";
+        assert_eq!(
+            tag_from_release_url(url).as_deref(),
+            Some("NotoSansDevanagari-v2.006")
+        );
+    }
+
+    #[test]
+    fn repo_from_release_url_extracts() {
+        let url = "https://github.com/notofonts/devanagari/releases/tag/NotoSansDevanagari-v2.006";
+        assert_eq!(
+            repo_from_release_url(url).as_deref(),
+            Some("notofonts/devanagari")
+        );
+    }
+
+    #[test]
+    fn choose_family_prefers_sans() {
+        let mut families = HashMap::new();
+        families.insert(
+            "Noto Sans Devanagari".to_string(),
+            NotofontsFamily {
+                latest_release: Some(NotofontsRelease {
+                    url: "https://github.com/notofonts/devanagari/releases/tag/NotoSansDevanagari-v2.006".to_string(),
+                }),
+                files: Vec::new(),
+            },
+        );
+        families.insert(
+            "Noto Serif Devanagari".to_string(),
+            NotofontsFamily {
+                latest_release: Some(NotofontsRelease {
+                    url: "https://github.com/notofonts/devanagari/releases/tag/NotoSerifDevanagari-v2.006".to_string(),
+                }),
+                files: Vec::new(),
+            },
+        );
+        let picked = choose_family_name(&families, FontStylePreference::Sans).expect("family");
+        assert_eq!(picked, "Noto Sans Devanagari");
+    }
+
+    #[test]
+    fn score_font_path_prefers_regular() {
+        let regular = score_font_path("fonts/NotoSans/ttf/NotoSans-Regular.ttf").unwrap();
+        let bold = score_font_path("fonts/NotoSans/ttf/NotoSans-Bold.ttf").unwrap();
+        assert!(regular > bold);
     }
 
     #[test]
@@ -2929,8 +4105,7 @@ mod tests {
 
     #[test]
     fn render_svg_includes_nf_fallback_when_needed() {
-        let mut cfg = Config::default();
-        cfg.font.family = "JetBrains Mono".to_string();
+        let cfg = Config::default();
         let request = RenderRequest {
             input: InputSource::Text("\u{f121}".to_string()),
             config: cfg,

@@ -20,11 +20,15 @@
   "margin": "0",
   "background": "#171717",
   "font": {
-    "family": "JetBrains Mono",
+    "family": "monospace",
     "size": 14,
     "ligatures": true,
     "fallbacks": [],
-    "system_fallback": "auto"
+    "system_fallback": "auto",
+    "auto_download": true,
+    "force_update": false,
+    "cjk_region": "auto",
+    "dirs": []
   },
   "line_height": 1.2,
   "raster": {

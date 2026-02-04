@@ -27,7 +27,7 @@
 - 交互式配置（`--interactive`）
 - 配置文件：`default / base / full / user / 自定义路径`
 - 字体嵌入（TTF/WOFF/WOFF2）
-- Nerd Font 符号回退（内置 Symbols Nerd Font Mono，可配置）
+- Nerd Font 符号回退（按需自动下载，可配置）
 - 标题栏（自动文件路径 / tmux 信息）
 - 栅格化后端：纯 Rust / rsvg-convert（自动检测）
 - 细节配置：padding/margin/border/shadow/line-height/lines/wrap/line-numbers
@@ -140,17 +140,31 @@ cryosnap main.rs -o out.png --raster.backend resvg
 
 ### 字体与 Nerd Font
 
-默认字体为 JetBrains Mono。Nerd Font 符号内置 Symbols Nerd Font Mono；
-多语言仍依赖系统字体回退（不内置 CJK）。可用 `font.fallbacks` 指定回退链，
-`font.system-fallback` 控制系统字体加载（auto/always/never）：
+默认字体为系统 `monospace`，**不再内置任何字体**。
+当输入包含非 ASCII 脚本、Emoji、或 Nerd Font 私用区字符时，会按 Unicode Script
+自动匹配 Noto 系列字体；若系统字体已覆盖则不下载，否则从 **GitHub 官方仓库**
+自动下载到 `~/.cryosnap/fonts`（可用 `font.dirs` 或 `CRYOSNAP_FONT_DIRS` 覆盖），随后渲染。
+可用 `font.fallbacks` 指定回退链，`font.system-fallback` 控制系统字体加载
+（auto/always/never），`font.auto-download` 控制自动下载；
+`font.cjk-region` 指定 CJK 偏好（auto/sc/tc/hk/jp/kr，auto 会按 LANG/LC_CTYPE 推断）；
+`font.force-update` 可强制刷新已下载字体：
 
 ```bash
-# Nerd Font 符号回退（内置 Symbols Nerd Font Mono）
-cryosnap main.rs -o out.png --font.fallbacks "Symbols Nerd Font Mono"
+# 自动下载缺失字体（默认开启）
+cryosnap main.rs -o out.png --font.auto-download true
 
 # Nerd Font + 中文回退
 cryosnap main.rs -o out.png --font.fallbacks "Symbols Nerd Font Mono, Noto Sans CJK SC" \
   --font.system-fallback auto
+
+# 指定 CJK 偏好
+cryosnap main.rs -o out.png --font.cjk-region hk
+
+# 禁用自动下载
+cryosnap main.rs -o out.png --font.auto-download false
+
+# 强制刷新已下载字体
+cryosnap main.rs -o out.png --font.force-update true
 ```
 
 ### 标题栏
@@ -281,8 +295,8 @@ MIT，详见 `LICENSE`。
 
 ### 第三方许可证
 
-- JetBrains Mono 字体：SIL Open Font License 1.1（见 `assets/JetBrainsMono-OFL-1.1.txt`）
-- Symbols Nerd Font Mono：MIT（见 `assets/SymbolsNerdFont-LICENSE.txt`）
+- Noto 字体（含 CJK/多脚本/Emoji）：SIL Open Font License 1.1（自动下载，来源 GitHub）
+- Nerd Font（Symbols Nerd Font Mono）：MIT（自动下载，来源 GitHub）
 
 ---
 
@@ -299,7 +313,7 @@ MIT，详见 `LICENSE`。
 - Interactive config (`--interactive`)
 - Config files: `default / base / full / user / custom`
 - Font embedding (TTF/WOFF/WOFF2)
-- Nerd Font symbol fallback (built-in Symbols Nerd Font Mono, configurable)
+- Nerd Font symbol fallback (auto-download, configurable)
 - Title bar (auto file path / tmux metadata)
 - Raster backends: pure Rust / rsvg-convert (auto-detect)
 - Detailed styling: padding/margin/border/shadow/line-height/lines/wrap/line-numbers
@@ -404,17 +418,32 @@ cryosnap main.rs -o out.png --raster.backend resvg
 
 ### Fonts & Nerd Font
 
-Default font is JetBrains Mono. Nerd Font symbols are built in via Symbols Nerd Font Mono;
-multi-language still relies on system font fallback (no embedded CJK). Use `font.fallbacks`
-and `font.system-fallback` (auto/always/never):
+Default font is system `monospace`, and **no fonts are embedded**.
+When input contains non-ASCII scripts, emoji, or Nerd Font private-use glyphs, cryosnap
+auto-maps to Noto families by Unicode Script. If system fonts already cover them it will not
+download; otherwise it downloads from **GitHub official repos** into `~/.cryosnap/fonts`
+(override via `font.dirs` or `CRYOSNAP_FONT_DIRS`).
+Use `font.fallbacks` to set a fallback chain, `font.system-fallback` for system font loading
+(auto/always/never), `font.auto-download` to control auto download,
+`font.cjk-region` to set CJK preference (auto/sc/tc/hk/jp/kr, auto uses LANG/LC_CTYPE),
+and `font.force-update` to force refreshing downloaded fonts:
 
 ```bash
-# Nerd Font symbols only (built-in Symbols Nerd Font Mono)
-cryosnap main.rs -o out.png --font.fallbacks "Symbols Nerd Font Mono"
+# Auto-download missing fonts (default on)
+cryosnap main.rs -o out.png --font.auto-download true
 
 # Nerd Font + CJK fallback
 cryosnap main.rs -o out.png --font.fallbacks "Symbols Nerd Font Mono, Noto Sans CJK SC" \
   --font.system-fallback auto
+
+# Set CJK preference
+cryosnap main.rs -o out.png --font.cjk-region hk
+
+# Disable auto-download
+cryosnap main.rs -o out.png --font.auto-download false
+
+# Force refresh downloaded fonts
+cryosnap main.rs -o out.png --font.force-update true
 ```
 
 ### Title Bar
@@ -542,5 +571,5 @@ MIT, see `LICENSE`.
 
 ### Third-party Licenses
 
-- JetBrains Mono font: SIL Open Font License 1.1 (see `assets/JetBrainsMono-OFL-1.1.txt`)
-- Symbols Nerd Font Mono: MIT (see `assets/SymbolsNerdFont-LICENSE.txt`)
+- Noto fonts (including CJK/multi-script/emoji): SIL Open Font License 1.1 (auto-downloaded from GitHub)
+- Nerd Font (Symbols Nerd Font Mono): MIT (auto-downloaded from GitHub)

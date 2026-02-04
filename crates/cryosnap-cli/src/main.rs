@@ -1,12 +1,12 @@
 use clap::{CommandFactory, Parser, ValueEnum};
 use cryosnap_core::{
-    Config, FontSystemFallback, InputSource, OutputFormat, PngQuantPreset, PngStrip, RasterBackend,
-    RenderRequest, TitleAlign, TitlePathStyle,
+    CjkRegion, Config, FontSystemFallback, InputSource, OutputFormat, PngQuantPreset, PngStrip,
+    RasterBackend, RenderRequest, TitleAlign, TitlePathStyle,
 };
 use dialoguer::{Confirm, Input, Select};
-use directories::ProjectDirs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -125,8 +125,38 @@ struct Args {
     #[arg(long = "font.fallbacks", value_name = "LIST")]
     font_fallbacks: Option<String>,
 
+    /// Font directories (comma-separated). Defaults to ~/.cryosnap/fonts.
+    #[arg(long = "font.dirs", value_name = "LIST")]
+    font_dirs: Option<String>,
+
+    /// CJK region preference (auto, sc, tc, hk, jp, kr).
+    #[arg(long = "font.cjk-region", value_enum, alias = "font.cjk.region")]
+    font_cjk_region: Option<FontCjkRegionArg>,
+
+    /// Auto-download missing fonts.
+    #[arg(
+        long = "font.auto-download",
+        num_args = 0..=1,
+        default_missing_value = "true",
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    font_auto_download: Option<bool>,
+
+    /// Force refresh downloaded fonts (always check latest when downloading).
+    #[arg(
+        long = "font.force-update",
+        num_args = 0..=1,
+        default_missing_value = "true",
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    font_force_update: Option<bool>,
+
     /// System font fallback mode (auto, always, never).
-    #[arg(long = "font.system-fallback", value_enum, alias = "font.system_fallback")]
+    #[arg(
+        long = "font.system-fallback",
+        value_enum,
+        alias = "font.system_fallback"
+    )]
     font_system_fallback: Option<FontSystemFallbackArg>,
 
     /// Font size.
@@ -291,6 +321,16 @@ enum FontSystemFallbackArg {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
+enum FontCjkRegionArg {
+    Auto,
+    Sc,
+    Tc,
+    Hk,
+    Jp,
+    Kr,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
 enum PngQuantPresetArg {
     Fast,
     Balanced,
@@ -323,6 +363,19 @@ impl From<FontSystemFallbackArg> for FontSystemFallback {
             FontSystemFallbackArg::Auto => FontSystemFallback::Auto,
             FontSystemFallbackArg::Always => FontSystemFallback::Always,
             FontSystemFallbackArg::Never => FontSystemFallback::Never,
+        }
+    }
+}
+
+impl From<FontCjkRegionArg> for CjkRegion {
+    fn from(value: FontCjkRegionArg) -> Self {
+        match value {
+            FontCjkRegionArg::Auto => CjkRegion::Auto,
+            FontCjkRegionArg::Sc => CjkRegion::Sc,
+            FontCjkRegionArg::Tc => CjkRegion::Tc,
+            FontCjkRegionArg::Hk => CjkRegion::Hk,
+            FontCjkRegionArg::Jp => CjkRegion::Jp,
+            FontCjkRegionArg::Kr => CjkRegion::Kr,
         }
     }
 }
@@ -455,6 +508,18 @@ fn run_with(
     }
     if let Some(fallbacks) = args.font_fallbacks {
         config.font.fallbacks = parse_font_fallbacks(&fallbacks)?;
+    }
+    if let Some(dirs) = args.font_dirs {
+        config.font.dirs = parse_font_dirs(&dirs)?;
+    }
+    if let Some(region) = args.font_cjk_region {
+        config.font.cjk_region = region.into();
+    }
+    if let Some(auto_download) = args.font_auto_download {
+        config.font.auto_download = auto_download;
+    }
+    if let Some(force_update) = args.font_force_update {
+        config.font.force_update = force_update;
     }
     if let Some(size) = args.font_size {
         config.font.size = size;
@@ -699,6 +764,9 @@ fn load_config(config_arg: Option<&str>) -> Result<(Config, bool), Box<dyn std::
 
 fn load_user_config() -> Result<Config, Box<dyn std::error::Error>> {
     let path = user_config_path()?;
+    if !path.exists() && !env_config_overridden() {
+        migrate_legacy_user_config(&path)?;
+    }
     let bytes = std::fs::read(path)?;
     Ok(serde_json::from_slice::<Config>(&bytes)?)
 }
@@ -720,9 +788,59 @@ fn user_config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Ok(dir) = std::env::var("CRYOSNAP_CONFIG_DIR") {
         return Ok(PathBuf::from(dir).join("user.json"));
     }
-    let project = ProjectDirs::from("sh", "cryosnap", "cryosnap")
-        .ok_or("unable to resolve config directory")?;
-    Ok(project.config_dir().join("user.json"))
+    Ok(default_config_dir()?.join("user.json"))
+}
+
+fn env_config_overridden() -> bool {
+    std::env::var("CRYOSNAP_CONFIG_PATH").is_ok() || std::env::var("CRYOSNAP_CONFIG_DIR").is_ok()
+}
+
+fn default_app_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Ok(path) = env::var("CRYOSNAP_HOME") {
+        return Ok(PathBuf::from(path));
+    }
+    let home = if cfg!(windows) {
+        if let Some(path) = env::var_os("USERPROFILE") {
+            PathBuf::from(path)
+        } else if let (Some(drive), Some(path)) =
+            (env::var_os("HOMEDRIVE"), env::var_os("HOMEPATH"))
+        {
+            PathBuf::from(drive).join(path)
+        } else {
+            return Err("unable to resolve home directory".into());
+        }
+    } else if let Some(path) = env::var_os("HOME") {
+        PathBuf::from(path)
+    } else {
+        return Err("unable to resolve home directory".into());
+    };
+    Ok(home.join(".cryosnap"))
+}
+
+fn default_config_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    Ok(default_app_dir()?.join("config"))
+}
+
+fn legacy_user_config_path() -> Option<PathBuf> {
+    let project = directories::ProjectDirs::from("sh", "cryosnap", "cryosnap")?;
+    Some(project.config_dir().join("user.json"))
+}
+
+fn migrate_legacy_user_config(target_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if target_path.exists() {
+        return Ok(());
+    }
+    let Some(legacy_path) = legacy_user_config_path() else {
+        return Ok(());
+    };
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(&legacy_path, target_path)?;
+    Ok(())
 }
 
 fn run_interactive(
@@ -882,6 +1000,39 @@ fn run_interactive_with(
         2 => FontSystemFallback::Never,
         _ => FontSystemFallback::Auto,
     };
+    config.font.auto_download =
+        prompter.confirm("Auto-download missing fonts?", config.font.auto_download)?;
+    let cjk_items = ["auto", "sc", "tc", "hk", "jp", "kr"];
+    let cjk_default = match config.font.cjk_region {
+        CjkRegion::Auto => 0,
+        CjkRegion::Sc => 1,
+        CjkRegion::Tc => 2,
+        CjkRegion::Hk => 3,
+        CjkRegion::Jp => 4,
+        CjkRegion::Kr => 5,
+    };
+    let cjk_choice = prompter.select("CJK region", &cjk_items, cjk_default)?;
+    config.font.cjk_region = match cjk_choice {
+        1 => CjkRegion::Sc,
+        2 => CjkRegion::Tc,
+        3 => CjkRegion::Hk,
+        4 => CjkRegion::Jp,
+        5 => CjkRegion::Kr,
+        _ => CjkRegion::Auto,
+    };
+    config.font.force_update =
+        prompter.confirm("Force refresh downloaded fonts?", config.font.force_update)?;
+    let dirs_default = if config.font.dirs.is_empty() {
+        String::new()
+    } else {
+        config.font.dirs.join(", ")
+    };
+    let dirs = prompter.input_string(
+        "Font dirs (comma-separated, empty for default)",
+        Some(&dirs_default),
+        true,
+    )?;
+    config.font.dirs = parse_font_dirs(&dirs)?;
     config.font.size = prompter.input_f32("Font size", config.font.size)?;
     config.font.ligatures = prompter.confirm("Enable ligatures?", config.font.ligatures)?;
     config.line_height = prompter.input_f32("Line height", config.line_height)?;
@@ -1054,6 +1205,20 @@ fn parse_lines(input: &str) -> Result<Vec<i32>, Box<dyn std::error::Error>> {
 }
 
 fn parse_font_fallbacks(input: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let parts = trimmed
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+    Ok(parts)
+}
+
+fn parse_font_dirs(input: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
@@ -1276,6 +1441,7 @@ mod tests {
         let prompter = FakePrompter::new();
         prompter.selects.borrow_mut().push_back(0);
         prompter.selects.borrow_mut().push_back(0);
+        prompter.selects.borrow_mut().push_back(0);
         prompter
             .strings
             .borrow_mut()
@@ -1296,6 +1462,7 @@ mod tests {
             .strings
             .borrow_mut()
             .push_back("Symbols Nerd Font Mono, Noto Sans CJK SC".to_string());
+        prompter.strings.borrow_mut().push_back(String::new());
         prompter.floats.borrow_mut().push_back(4.0);
         prompter.floats.borrow_mut().push_back(1.0);
         prompter.floats.borrow_mut().push_back(6.0);
@@ -1305,6 +1472,8 @@ mod tests {
         prompter.floats.borrow_mut().push_back(1.3);
         prompter.bools.borrow_mut().push_back(true);
         prompter.bools.borrow_mut().push_back(true);
+        prompter.bools.borrow_mut().push_back(true);
+        prompter.bools.borrow_mut().push_back(false);
         prompter.bools.borrow_mut().push_back(false);
 
         let mut cfg = Config::default();
@@ -1327,6 +1496,10 @@ mod tests {
             vec!["Symbols Nerd Font Mono", "Noto Sans CJK SC"]
         );
         assert!(matches!(cfg.font.system_fallback, FontSystemFallback::Auto));
+        assert!(cfg.font.auto_download);
+        assert!(matches!(cfg.font.cjk_region, CjkRegion::Auto));
+        assert!(!cfg.font.force_update);
+        assert!(cfg.font.dirs.is_empty());
         assert_eq!(cfg.font.size, 14.0);
         assert_eq!(cfg.line_height, 1.3);
         assert!(!cfg.font.ligatures);
@@ -1511,7 +1684,7 @@ mod tests {
         args.shadow_blur = Some(6.0);
         args.shadow_x = Some(1.0);
         args.shadow_y = Some(2.0);
-        args.font_family = Some("JetBrains Mono".to_string());
+        args.font_family = Some("monospace".to_string());
         args.font_size = Some(12.0);
         args.line_height = Some(1.4);
         args.raster_scale = Some(2.0);
@@ -1558,6 +1731,7 @@ mod tests {
         let prompter = FakePrompter::new();
         prompter.selects.borrow_mut().push_back(1);
         prompter.selects.borrow_mut().push_back(0);
+        prompter.selects.borrow_mut().push_back(0);
         prompter
             .strings
             .borrow_mut()
@@ -1578,6 +1752,7 @@ mod tests {
             .strings
             .borrow_mut()
             .push_back("Symbols Nerd Font Mono".to_string());
+        prompter.strings.borrow_mut().push_back(String::new());
         prompter.floats.borrow_mut().push_back(4.0);
         prompter.floats.borrow_mut().push_back(1.0);
         prompter.floats.borrow_mut().push_back(6.0);
@@ -1587,6 +1762,8 @@ mod tests {
         prompter.floats.borrow_mut().push_back(1.3);
         prompter.bools.borrow_mut().push_back(true);
         prompter.bools.borrow_mut().push_back(true);
+        prompter.bools.borrow_mut().push_back(true);
+        prompter.bools.borrow_mut().push_back(false);
         prompter.bools.borrow_mut().push_back(false);
 
         let mut cfg = Config::default();
