@@ -1187,7 +1187,7 @@ fn choose_family_name(
     families: &HashMap<String, NotofontsFamily>,
     style: FontStylePreference,
 ) -> Option<String> {
-    let mut candidates = families
+    let candidates = families
         .iter()
         .filter(|(_, info)| info.latest_release.is_some() || !info.files.is_empty())
         .map(|(name, _)| name.clone())
@@ -1195,25 +1195,66 @@ fn choose_family_name(
     if candidates.is_empty() {
         return None;
     }
-    let (primary, secondary, extra) = match style {
-        FontStylePreference::Sans => ("Noto Sans", "Sans", "Kufi"),
-        FontStylePreference::Serif => ("Noto Serif", "Serif", "Naskh"),
-    };
-    for pattern in [primary, secondary, extra] {
-        if let Some(name) = candidates
-            .iter()
-            .find(|name| name.contains(pattern))
-            .cloned()
-        {
-            return Some(name);
+    let mut best: Option<(i32, &String)> = None;
+    for name in &candidates {
+        let score = score_family_name(name, style);
+        match best {
+            None => best = Some((score, name)),
+            Some((best_score, best_name)) => {
+                if score > best_score
+                    || (score == best_score && name.len() < best_name.len())
+                    || (score == best_score && name.len() == best_name.len() && name < best_name)
+                {
+                    best = Some((score, name));
+                }
+            }
         }
     }
-    candidates.sort();
-    Some(candidates[0].clone())
+    best.map(|(_, name)| name.clone())
 }
 
 fn tag_from_release_url(url: &str) -> Option<String> {
     url.rsplit('/').next().map(|v| v.to_string())
+}
+
+fn score_family_name(name: &str, style: FontStylePreference) -> i32 {
+    let lower = name.to_ascii_lowercase();
+    let mut score = 0;
+    match style {
+        FontStylePreference::Sans => {
+            if lower.contains("noto sans") {
+                score += 300;
+            } else if lower.contains("sans") {
+                score += 200;
+            }
+            if lower.contains("kufi") {
+                score += 120;
+            }
+        }
+        FontStylePreference::Serif => {
+            if lower.contains("noto serif") {
+                score += 300;
+            } else if lower.contains("serif") {
+                score += 200;
+            }
+            if lower.contains("naskh") {
+                score += 120;
+            }
+        }
+    }
+    if lower.contains("supplement") {
+        score -= 200;
+    }
+    if lower.contains("looped") {
+        score -= 120;
+    }
+    if lower.contains("display") {
+        score -= 40;
+    }
+    if lower.contains("ui") {
+        score -= 20;
+    }
+    score
 }
 
 fn repo_from_release_url(url: &str) -> Option<String> {
@@ -3839,6 +3880,59 @@ mod tests {
         );
         let picked = choose_family_name(&families, FontStylePreference::Sans).expect("family");
         assert_eq!(picked, "Noto Sans Devanagari");
+    }
+
+    #[test]
+    fn choose_family_avoids_supplement_when_possible() {
+        let mut families = HashMap::new();
+        families.insert(
+            "Noto Sans Tamil".to_string(),
+            NotofontsFamily {
+                latest_release: Some(NotofontsRelease {
+                    url: "https://github.com/notofonts/tamil/releases/tag/NotoSansTamil-v2.006"
+                        .to_string(),
+                }),
+                files: Vec::new(),
+            },
+        );
+        families.insert(
+            "Noto Sans Tamil Supplement".to_string(),
+            NotofontsFamily {
+                latest_release: Some(NotofontsRelease {
+                    url: "https://github.com/notofonts/tamil/releases/tag/NotoSansTamilSupplement-v2.006".to_string(),
+                }),
+                files: Vec::new(),
+            },
+        );
+        let picked = choose_family_name(&families, FontStylePreference::Sans).expect("family");
+        assert_eq!(picked, "Noto Sans Tamil");
+    }
+
+    #[test]
+    fn choose_family_avoids_looped_when_possible() {
+        let mut families = HashMap::new();
+        families.insert(
+            "Noto Sans Thai".to_string(),
+            NotofontsFamily {
+                latest_release: Some(NotofontsRelease {
+                    url: "https://github.com/notofonts/thai/releases/tag/NotoSansThai-v2.006"
+                        .to_string(),
+                }),
+                files: Vec::new(),
+            },
+        );
+        families.insert(
+            "Noto Sans Thai Looped".to_string(),
+            NotofontsFamily {
+                latest_release: Some(NotofontsRelease {
+                    url: "https://github.com/notofonts/thai/releases/tag/NotoSansThaiLooped-v2.006"
+                        .to_string(),
+                }),
+                files: Vec::new(),
+            },
+        );
+        let picked = choose_family_name(&families, FontStylePreference::Sans).expect("family");
+        assert_eq!(picked, "Noto Sans Thai");
     }
 
     #[test]
