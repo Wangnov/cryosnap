@@ -1,6 +1,6 @@
 use base64::Engine;
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -141,321 +141,14 @@ const NOTO_CJK_KR_URLS: &[&str] = &[
 ];
 const DEFAULT_GITHUB_PROXIES: &[&str] = &["https://fastgit.cc/", "https://ghfast.top/"];
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Config {
-    pub theme: String,
-    pub background: String,
-    #[serde(deserialize_with = "deserialize_box")]
-    pub padding: Vec<f32>,
-    #[serde(deserialize_with = "deserialize_box")]
-    pub margin: Vec<f32>,
-    pub width: f32,
-    pub height: f32,
-    #[serde(rename = "window")]
-    pub window_controls: bool,
-    #[serde(rename = "show_line_numbers")]
-    pub show_line_numbers: bool,
-    pub language: Option<String>,
-    pub execute_timeout_ms: u64,
-    pub wrap: usize,
-    #[serde(deserialize_with = "deserialize_lines")]
-    pub lines: Vec<i32>,
-    pub border: Border,
-    pub shadow: Shadow,
-    pub font: Font,
-    #[serde(rename = "line_height")]
-    pub line_height: f32,
-    pub raster: RasterOptions,
-    pub png: PngOptions,
-    pub title: TitleOptions,
-}
+mod config;
+mod types;
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            theme: "charm".to_string(),
-            background: "#171717".to_string(),
-            padding: vec![20.0, 40.0, 20.0, 20.0],
-            margin: vec![0.0],
-            width: 0.0,
-            height: 0.0,
-            window_controls: false,
-            show_line_numbers: false,
-            language: None,
-            execute_timeout_ms: 10_000,
-            wrap: 0,
-            lines: vec![0, -1],
-            border: Border::default(),
-            shadow: Shadow::default(),
-            font: Font::default(),
-            line_height: 1.2,
-            raster: RasterOptions::default(),
-            png: PngOptions::default(),
-            title: TitleOptions::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Border {
-    pub radius: f32,
-    pub width: f32,
-    pub color: String,
-}
-
-impl Default for Border {
-    fn default() -> Self {
-        Self {
-            radius: 0.0,
-            width: 0.0,
-            color: "#515151".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Shadow {
-    pub blur: f32,
-    pub x: f32,
-    pub y: f32,
-}
-
-impl Default for Shadow {
-    fn default() -> Self {
-        Self {
-            blur: 0.0,
-            x: 0.0,
-            y: 0.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Font {
-    pub family: String,
-    pub file: Option<String>,
-    pub size: f32,
-    pub ligatures: bool,
-    pub fallbacks: Vec<String>,
-    #[serde(rename = "system_fallback")]
-    pub system_fallback: FontSystemFallback,
-    #[serde(rename = "auto_download")]
-    pub auto_download: bool,
-    #[serde(rename = "force_update")]
-    pub force_update: bool,
-    #[serde(rename = "cjk_region")]
-    pub cjk_region: CjkRegion,
-    #[serde(rename = "dirs")]
-    pub dirs: Vec<String>,
-}
-
-impl Default for Font {
-    fn default() -> Self {
-        Self {
-            family: "monospace".to_string(),
-            file: None,
-            size: 14.0,
-            ligatures: true,
-            fallbacks: Vec::new(),
-            system_fallback: FontSystemFallback::default(),
-            auto_download: true,
-            force_update: false,
-            cjk_region: CjkRegion::default(),
-            dirs: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum FontSystemFallback {
-    #[default]
-    Auto,
-    Always,
-    Never,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
-#[serde(rename_all = "lowercase")]
-pub enum CjkRegion {
-    #[default]
-    Auto,
-    Sc,
-    Tc,
-    Hk,
-    Jp,
-    Kr,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct RasterOptions {
-    pub scale: f32,
-    pub max_pixels: u64,
-    pub backend: RasterBackend,
-}
-
-impl Default for RasterOptions {
-    fn default() -> Self {
-        Self {
-            scale: DEFAULT_RASTER_SCALE,
-            max_pixels: DEFAULT_RASTER_MAX_PIXELS,
-            backend: RasterBackend::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum RasterBackend {
-    #[default]
-    Auto,
-    Resvg,
-    Rsvg,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum TitleAlign {
-    Left,
-    #[default]
-    Center,
-    Right,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum TitlePathStyle {
-    #[default]
-    Absolute,
-    Relative,
-    Basename,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct TitleOptions {
-    pub enabled: bool,
-    pub text: Option<String>,
-    pub path_style: TitlePathStyle,
-    pub tmux_format: String,
-    pub align: TitleAlign,
-    pub size: f32,
-    pub color: String,
-    pub opacity: f32,
-    pub max_width: usize,
-    pub ellipsis: String,
-}
-
-impl Default for TitleOptions {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            text: None,
-            path_style: TitlePathStyle::Absolute,
-            tmux_format: "#{session_name}:#{window_index}.#{pane_index} #{pane_title}".to_string(),
-            align: TitleAlign::Center,
-            size: DEFAULT_TITLE_SIZE,
-            color: "#C5C8C6".to_string(),
-            opacity: DEFAULT_TITLE_OPACITY,
-            max_width: DEFAULT_TITLE_MAX_WIDTH,
-            ellipsis: "…".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum PngStrip {
-    None,
-    #[default]
-    Safe,
-    All,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PngQuantPreset {
-    Fast,
-    Balanced,
-    Best,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct PngOptions {
-    pub optimize: bool,
-    pub level: u8,
-    pub strip: PngStrip,
-    pub quantize: bool,
-    pub quantize_preset: Option<PngQuantPreset>,
-    pub quantize_quality: u8,
-    pub quantize_speed: u8,
-    pub quantize_dither: f32,
-}
-
-impl Default for PngOptions {
-    fn default() -> Self {
-        Self {
-            optimize: true,
-            level: DEFAULT_PNG_OPT_LEVEL,
-            strip: PngStrip::Safe,
-            quantize: false,
-            quantize_preset: None,
-            quantize_quality: DEFAULT_PNG_QUANTIZE_QUALITY,
-            quantize_speed: DEFAULT_PNG_QUANTIZE_SPEED,
-            quantize_dither: DEFAULT_PNG_QUANTIZE_DITHER,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum InputSource {
-    Text(String),
-    File(PathBuf),
-    Command(String),
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum OutputFormat {
-    Svg,
-    Png,
-    Webp,
-}
-
-#[derive(Debug, Clone)]
-pub struct RenderRequest {
-    pub input: InputSource,
-    pub config: Config,
-    pub format: OutputFormat,
-}
-
-#[derive(Debug, Clone)]
-pub struct RenderResult {
-    pub format: OutputFormat,
-    pub bytes: Vec<u8>,
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("not implemented: {0}")]
-    NotImplemented(&'static str),
-    #[error("invalid input: {0}")]
-    InvalidInput(String),
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("render error: {0}")]
-    Render(String),
-    #[error("execution timeout")]
-    Timeout,
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
+pub use config::{
+    Border, CjkRegion, Config, Font, FontSystemFallback, PngOptions, PngQuantPreset, PngStrip,
+    RasterBackend, RasterOptions, Shadow, TitleAlign, TitleOptions, TitlePathStyle,
+};
+pub use types::{Error, InputSource, OutputFormat, RenderRequest, RenderResult, Result};
 
 pub fn render(request: &RenderRequest) -> Result<RenderResult> {
     let bytes = match request.format {
@@ -1650,6 +1343,63 @@ static HTTP_AGENT: Lazy<ureq::Agent> = Lazy::new(|| {
         .build()
 });
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum DownloadLogLevel {
+    Off = 0,
+    Error = 1,
+    Warn = 2,
+    Info = 3,
+    Debug = 4,
+    Trace = 5,
+}
+
+fn parse_download_log_level(value: &str) -> Option<DownloadLogLevel> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" => None,
+        "off" | "none" | "0" | "false" | "no" => Some(DownloadLogLevel::Off),
+        "error" | "err" | "1" => Some(DownloadLogLevel::Error),
+        "warn" | "warning" | "2" => Some(DownloadLogLevel::Warn),
+        "info" | "3" => Some(DownloadLogLevel::Info),
+        "debug" | "dbg" | "4" => Some(DownloadLogLevel::Debug),
+        "trace" | "5" => Some(DownloadLogLevel::Trace),
+        _ => None,
+    }
+}
+
+fn download_log_level() -> DownloadLogLevel {
+    if let Ok(value) = env::var("CRYOSNAP_FONT_LOG") {
+        if let Some(level) = parse_download_log_level(&value) {
+            return level;
+        }
+    }
+    if let Ok(value) = env::var("CRYOSNAP_LOG") {
+        if let Some(level) = parse_download_log_level(&value) {
+            return level;
+        }
+    }
+    DownloadLogLevel::Info
+}
+
+fn download_log(level: DownloadLogLevel, message: impl AsRef<str>) {
+    if matches!(level, DownloadLogLevel::Off) {
+        return;
+    }
+    let current = download_log_level();
+    if level > current {
+        return;
+    }
+    let label = match level {
+        DownloadLogLevel::Error => "error",
+        DownloadLogLevel::Warn => "warn",
+        DownloadLogLevel::Info => "info",
+        DownloadLogLevel::Debug => "debug",
+        DownloadLogLevel::Trace => "trace",
+        DownloadLogLevel::Off => "off",
+    };
+    eprintln!("cryosnap [{label}]: {}", message.as_ref());
+}
+
 fn github_proxy_candidates() -> Vec<String> {
     if let Ok(value) = env::var("CRYOSNAP_GITHUB_PROXY") {
         let parts = value
@@ -1716,6 +1466,14 @@ fn fetch_with_candidates(url: &str, headers: &[(&str, &str)]) -> Result<FetchOut
             Some(proxy) => apply_github_proxy(url, proxy),
             None => url.to_string(),
         };
+        download_log(
+            DownloadLogLevel::Debug,
+            format!(
+                "fetching {} via {}",
+                url,
+                proxy_opt.as_deref().unwrap_or("direct")
+            ),
+        );
         let mut req = HTTP_AGENT
             .get(&target)
             .set("User-Agent", "cryosnap/auto-font");
@@ -1732,6 +1490,14 @@ fn fetch_with_candidates(url: &str, headers: &[(&str, &str)]) -> Result<FetchOut
             Err(ureq::Error::Status(304, _)) => return Ok(FetchOutcome::NotModified),
             Err(err) => {
                 last_error = Some(format!("{err}"));
+                download_log(
+                    DownloadLogLevel::Debug,
+                    format!(
+                        "fetch failed via {}: {}",
+                        proxy_opt.as_deref().unwrap_or("direct"),
+                        last_error.as_deref().unwrap_or("unknown error")
+                    ),
+                );
                 continue;
             }
         }
@@ -1766,6 +1532,14 @@ fn fetch_bytes_with_cache(url: &str, cache_name: &str, force_update: bool) -> Re
             Some(proxy) => apply_github_proxy(url, proxy),
             None => url.to_string(),
         };
+        download_log(
+            DownloadLogLevel::Debug,
+            format!(
+                "fetching {} via {}",
+                url,
+                proxy_opt.as_deref().unwrap_or("direct")
+            ),
+        );
         let mut req = HTTP_AGENT
             .get(&target)
             .set("User-Agent", "cryosnap/auto-font");
@@ -1817,6 +1591,14 @@ fn fetch_bytes_with_cache(url: &str, cache_name: &str, force_update: bool) -> Re
             }
             Err(err) => {
                 last_error = Some(format!("{err}"));
+                download_log(
+                    DownloadLogLevel::Debug,
+                    format!(
+                        "fetch failed via {}: {}",
+                        proxy_opt.as_deref().unwrap_or("direct"),
+                        last_error.as_deref().unwrap_or("unknown error")
+                    ),
+                );
                 continue;
             }
         }
@@ -1921,11 +1703,13 @@ fn ensure_fonts_available(
     script_plan: &ScriptFontPlan,
 ) -> Result<()> {
     if !auto_download_enabled(config) {
+        download_log(DownloadLogLevel::Debug, "auto-download disabled");
         return Ok(());
     }
     let force_update = force_update_enabled(config);
     if !needs.needs_nf && !needs.needs_cjk && !needs.needs_emoji && script_plan.downloads.is_empty()
     {
+        download_log(DownloadLogLevel::Debug, "no font downloads required");
         return Ok(());
     }
     let font_dirs = resolve_font_dirs(config)?;
@@ -1957,11 +1741,19 @@ fn ensure_fonts_available(
                 continue;
             }
         }
-        if let Err(err) = download_notofonts_file(download, primary_dir, force_update) {
-            eprintln!(
-                "cryosnap: font download failed for {}: {}",
-                download.family, err
-            );
+        match download_notofonts_file(download, primary_dir, force_update) {
+            Ok(true) => download_log(
+                DownloadLogLevel::Info,
+                format!("downloaded font {}", download.family),
+            ),
+            Ok(false) => download_log(
+                DownloadLogLevel::Debug,
+                format!("font up-to-date {}", download.family),
+            ),
+            Err(err) => download_log(
+                DownloadLogLevel::Warn,
+                format!("font download failed for {}: {}", download.family, err),
+            ),
         }
     }
 
@@ -1969,11 +1761,19 @@ fn ensure_fonts_available(
         && !any_family_present(&[FONT_PACKAGE_NF.family], &app_families)
         && !(allow_system && any_family_present(&[FONT_PACKAGE_NF.family], &system_families))
     {
-        if let Err(err) = download_font_package(&FONT_PACKAGE_NF, primary_dir) {
-            eprintln!(
-                "cryosnap: font download failed for {}: {}",
-                FONT_PACKAGE_NF.id, err
-            );
+        match download_font_package(&FONT_PACKAGE_NF, primary_dir) {
+            Ok(true) => download_log(
+                DownloadLogLevel::Info,
+                format!("downloaded font {}", FONT_PACKAGE_NF.family),
+            ),
+            Ok(false) => download_log(
+                DownloadLogLevel::Debug,
+                format!("font up-to-date {}", FONT_PACKAGE_NF.family),
+            ),
+            Err(err) => download_log(
+                DownloadLogLevel::Warn,
+                format!("font download failed for {}: {}", FONT_PACKAGE_NF.id, err),
+            ),
         }
     }
 
@@ -1996,10 +1796,19 @@ fn ensure_fonts_available(
                     continue;
                 }
             }
-            if let Err(err) =
-                download_raw_font(cjk_region_urls(region), primary_dir, filename, force_update)
-            {
-                eprintln!("cryosnap: font download failed for cjk: {}", err);
+            match download_raw_font(cjk_region_urls(region), primary_dir, filename, force_update) {
+                Ok(true) => download_log(
+                    DownloadLogLevel::Info,
+                    format!("downloaded font {}", filename),
+                ),
+                Ok(false) => download_log(
+                    DownloadLogLevel::Debug,
+                    format!("font up-to-date {}", filename),
+                ),
+                Err(err) => download_log(
+                    DownloadLogLevel::Warn,
+                    format!("font download failed for cjk: {}", err),
+                ),
             }
         }
     }
@@ -2011,10 +1820,17 @@ fn ensure_fonts_available(
             let filename = "NotoColorEmoji.ttf";
             let target = primary_dir.join(filename);
             if !app_has || (force_update && target.exists()) {
-                if let Err(err) =
-                    download_raw_font(NOTO_EMOJI_URLS, primary_dir, filename, force_update)
-                {
-                    eprintln!("cryosnap: font download failed for emoji: {}", err);
+                match download_raw_font(NOTO_EMOJI_URLS, primary_dir, filename, force_update) {
+                    Ok(true) => {
+                        download_log(DownloadLogLevel::Info, "downloaded font Noto Color Emoji")
+                    }
+                    Ok(false) => {
+                        download_log(DownloadLogLevel::Debug, "font up-to-date Noto Color Emoji")
+                    }
+                    Err(err) => download_log(
+                        DownloadLogLevel::Warn,
+                        format!("font download failed for emoji: {}", err),
+                    ),
                 }
             }
         }
@@ -2027,13 +1843,28 @@ fn any_family_present(families: &[&str], set: &HashSet<String>) -> bool {
     families.iter().any(|name| set.contains(&family_key(name)))
 }
 
-fn download_raw_font(urls: &[&str], dir: &Path, filename: &str, force_update: bool) -> Result<()> {
+fn download_raw_font(
+    urls: &[&str],
+    dir: &Path,
+    filename: &str,
+    force_update: bool,
+) -> Result<bool> {
     let target = dir.join(filename);
     let mut last_error: Option<Error> = None;
     for url in urls {
         match download_url_with_etag(url, &target, force_update) {
-            Ok(_) => return Ok(()),
-            Err(err) => last_error = Some(err),
+            Ok(downloaded) => return Ok(downloaded),
+            Err(err) => {
+                last_error = Some(err);
+                download_log(
+                    DownloadLogLevel::Debug,
+                    format!(
+                        "download failed from {}: {}",
+                        url,
+                        last_error.as_ref().unwrap()
+                    ),
+                );
+            }
         }
     }
     Err(last_error
@@ -2044,10 +1875,10 @@ fn download_notofonts_file(
     download: &ScriptDownload,
     dir: &Path,
     force_update: bool,
-) -> Result<()> {
+) -> Result<bool> {
     let target = dir.join(&download.filename);
     if !force_update && target.exists() {
-        return Ok(());
+        return Ok(false);
     }
     let mut refs = vec!["main".to_string(), "master".to_string()];
     if let Some(tag) = &download.tag {
@@ -2062,8 +1893,18 @@ fn download_notofonts_file(
             download.repo, reference, download.file_path
         );
         match download_url_with_etag(&url, &target, force_update) {
-            Ok(_) => return Ok(()),
-            Err(err) => last_error = Some(err),
+            Ok(downloaded) => return Ok(downloaded),
+            Err(err) => {
+                last_error = Some(err);
+                download_log(
+                    DownloadLogLevel::Debug,
+                    format!(
+                        "download failed from {}: {}",
+                        url,
+                        last_error.as_ref().unwrap()
+                    ),
+                );
+            }
         }
     }
     Err(last_error
@@ -2091,6 +1932,14 @@ fn download_zip_with_candidates(url: &str, target: &Path) -> Result<()> {
             Some(proxy) => apply_github_proxy(url, proxy),
             None => url.to_string(),
         };
+        download_log(
+            DownloadLogLevel::Debug,
+            format!(
+                "fetching {} via {}",
+                url,
+                proxy_opt.as_deref().unwrap_or("direct")
+            ),
+        );
         let req = HTTP_AGENT
             .get(&target_url)
             .set("User-Agent", "cryosnap/auto-font");
@@ -2111,10 +1960,26 @@ fn download_zip_with_candidates(url: &str, target: &Path) -> Result<()> {
             }
             Err(ureq::Error::Status(status, _)) => {
                 last_error = Some(format!("status {status}"));
+                download_log(
+                    DownloadLogLevel::Debug,
+                    format!(
+                        "fetch failed via {}: {}",
+                        proxy_opt.as_deref().unwrap_or("direct"),
+                        last_error.as_deref().unwrap_or("unknown error")
+                    ),
+                );
                 continue;
             }
             Err(err) => {
                 last_error = Some(format!("{err}"));
+                download_log(
+                    DownloadLogLevel::Debug,
+                    format!(
+                        "fetch failed via {}: {}",
+                        proxy_opt.as_deref().unwrap_or("direct"),
+                        last_error.as_deref().unwrap_or("unknown error")
+                    ),
+                );
                 continue;
             }
         }
@@ -2133,10 +1998,10 @@ fn validate_zip_archive(path: &Path) -> Result<()> {
     }
 }
 
-fn download_font_package(pkg: &FontPackage, dir: &Path) -> Result<()> {
+fn download_font_package(pkg: &FontPackage, dir: &Path) -> Result<bool> {
     let target = dir.join(pkg.filename);
     if verify_sha256(&target, pkg.file_sha256)? {
-        return Ok(());
+        return Ok(false);
     }
     let temp = dir.join(format!("{}.download", pkg.filename));
     if pkg.archive_entry.is_some() {
@@ -2163,7 +2028,7 @@ fn download_font_package(pkg: &FontPackage, dir: &Path) -> Result<()> {
             pkg.id
         )));
     }
-    Ok(())
+    Ok(true)
 }
 
 fn extract_zip_entry(archive_path: &Path, entry: &str, target: &Path) -> Result<()> {
@@ -2925,124 +2790,6 @@ fn color_to_hex(color: syntect::highlighting::Color) -> String {
     format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b)
 }
 
-fn deserialize_box<'de, D>(deserializer: D) -> std::result::Result<Vec<f32>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = serde_json::Value::deserialize(deserializer)?;
-    parse_box_value(&value).map_err(serde::de::Error::custom)
-}
-
-fn parse_box_value(value: &serde_json::Value) -> std::result::Result<Vec<f32>, String> {
-    match value {
-        serde_json::Value::Number(n) => n
-            .as_f64()
-            .map(|v| vec![v as f32])
-            .ok_or_else(|| "invalid number".to_string()),
-        serde_json::Value::String(s) => parse_box_string(s),
-        serde_json::Value::Array(arr) => {
-            let mut out = Vec::new();
-            for item in arr {
-                match item {
-                    serde_json::Value::Number(n) => {
-                        out.push(n.as_f64().ok_or_else(|| "invalid number".to_string())? as f32);
-                    }
-                    serde_json::Value::String(s) => {
-                        let parsed = parse_box_string(s)?;
-                        out.extend(parsed);
-                    }
-                    _ => return Err("invalid array value".to_string()),
-                }
-            }
-            if matches!(out.len(), 1 | 2 | 4) {
-                Ok(out)
-            } else {
-                Err(format!("expected 1, 2, or 4 values, got {}", out.len()))
-            }
-        }
-        serde_json::Value::Null => Ok(vec![0.0]),
-        _ => Err("invalid box value".to_string()),
-    }
-}
-
-fn parse_box_string(input: &str) -> std::result::Result<Vec<f32>, String> {
-    let parts: Vec<&str> = input.split([',', ' ']).filter(|s| !s.is_empty()).collect();
-    if parts.is_empty() {
-        return Ok(vec![0.0]);
-    }
-    let mut out = Vec::new();
-    for part in parts {
-        let value = part
-            .parse::<f32>()
-            .map_err(|_| format!("invalid number {}", part))?;
-        out.push(value);
-    }
-    if matches!(out.len(), 1 | 2 | 4) {
-        Ok(out)
-    } else {
-        Err(format!("expected 1, 2, or 4 values, got {}", out.len()))
-    }
-}
-
-fn deserialize_lines<'de, D>(deserializer: D) -> std::result::Result<Vec<i32>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = serde_json::Value::deserialize(deserializer)?;
-    parse_lines_value(&value).map_err(serde::de::Error::custom)
-}
-
-fn parse_lines_value(value: &serde_json::Value) -> std::result::Result<Vec<i32>, String> {
-    match value {
-        serde_json::Value::Number(n) => n
-            .as_i64()
-            .map(|v| vec![v as i32])
-            .ok_or_else(|| "invalid number".to_string()),
-        serde_json::Value::String(s) => parse_lines_string(s),
-        serde_json::Value::Array(arr) => {
-            let mut out = Vec::new();
-            for item in arr {
-                match item {
-                    serde_json::Value::Number(n) => {
-                        out.push(n.as_i64().ok_or_else(|| "invalid number".to_string())? as i32);
-                    }
-                    serde_json::Value::String(s) => {
-                        let parsed = parse_lines_string(s)?;
-                        out.extend(parsed);
-                    }
-                    _ => return Err("invalid array value".to_string()),
-                }
-            }
-            if matches!(out.len(), 1 | 2) {
-                Ok(out)
-            } else {
-                Err(format!("expected 1 or 2 values, got {}", out.len()))
-            }
-        }
-        serde_json::Value::Null => Ok(vec![]),
-        _ => Err("invalid lines value".to_string()),
-    }
-}
-
-fn parse_lines_string(input: &str) -> std::result::Result<Vec<i32>, String> {
-    let parts: Vec<&str> = input.split([',', ' ']).filter(|s| !s.is_empty()).collect();
-    if parts.is_empty() {
-        return Ok(vec![]);
-    }
-    let mut out = Vec::new();
-    for part in parts {
-        let value = part
-            .parse::<i32>()
-            .map_err(|_| format!("invalid number {}", part))?;
-        out.push(value);
-    }
-    if matches!(out.len(), 1 | 2) {
-        Ok(out)
-    } else {
-        Err(format!("expected 1 or 2 values, got {}", out.len()))
-    }
-}
-
 fn charm_theme() -> syntect::highlighting::Theme {
     use std::str::FromStr;
     use syntect::highlighting::{
@@ -3322,6 +3069,111 @@ fn push_span(spans: &mut Vec<Span>, text: String, style: TextStyle) {
     spans.push(Span { text, style });
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FontGroup {
+    Default,
+    Cjk,
+    Emoji,
+    Nerd,
+    Unicode,
+}
+
+fn font_group_for_char(ch: char, prev: Option<FontGroup>) -> FontGroup {
+    if is_private_use(ch) {
+        return FontGroup::Nerd;
+    }
+    if is_emoji(ch) {
+        return FontGroup::Emoji;
+    }
+    if is_cjk(ch) {
+        return FontGroup::Cjk;
+    }
+    let script = ch.script();
+    if matches!(script, Script::Common | Script::Inherited | Script::Unknown) {
+        if let Some(prev) = prev {
+            return prev;
+        }
+    }
+    if ch <= '\u{7f}' {
+        FontGroup::Default
+    } else {
+        FontGroup::Unicode
+    }
+}
+
+fn split_text_by_font_group(text: &str) -> Vec<(FontGroup, String)> {
+    let mut out = Vec::new();
+    let mut current_group: Option<FontGroup> = None;
+    let mut current = String::new();
+    for ch in text.chars() {
+        let group = font_group_for_char(ch, current_group);
+        match current_group {
+            Some(existing) if existing == group => {
+                current.push(ch);
+            }
+            Some(existing) => {
+                if !current.is_empty() {
+                    out.push((existing, current));
+                }
+                current = String::new();
+                current.push(ch);
+                current_group = Some(group);
+            }
+            None => {
+                current_group = Some(group);
+                current.push(ch);
+            }
+        }
+    }
+    if let Some(group) = current_group {
+        if !current.is_empty() {
+            out.push((group, current));
+        }
+    }
+    out
+}
+
+struct FontFamilyVariants {
+    default: String,
+    cjk: String,
+    emoji: String,
+    nerd: String,
+    unicode: String,
+}
+
+impl FontFamilyVariants {
+    fn for_group(&self, group: FontGroup) -> &str {
+        match group {
+            FontGroup::Default => &self.default,
+            FontGroup::Cjk => &self.cjk,
+            FontGroup::Emoji => &self.emoji,
+            FontGroup::Nerd => &self.nerd,
+            FontGroup::Unicode => &self.unicode,
+        }
+    }
+}
+
+fn parse_font_family_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.to_string())
+        .collect()
+}
+
+fn build_font_family_variant(base: &[String], prefix: &[&str]) -> String {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for name in prefix {
+        push_family(&mut out, &mut seen, name);
+    }
+    for name in base {
+        push_family(&mut out, &mut seen, name);
+    }
+    out.join(", ")
+}
+
 fn build_svg(
     lines: &[Line],
     config: &Config,
@@ -3331,6 +3183,24 @@ fn build_svg(
     title_text: Option<&str>,
     font_family: &str,
 ) -> String {
+    let base_families = parse_font_family_list(font_family);
+    let default_family = if base_families.is_empty() {
+        font_family.to_string()
+    } else {
+        base_families.join(", ")
+    };
+    let cjk_region = match config.font.cjk_region {
+        CjkRegion::Auto => locale_cjk_region().unwrap_or(CjkRegion::Sc),
+        other => other,
+    };
+    let font_variants = FontFamilyVariants {
+        default: default_family,
+        cjk: build_font_family_variant(&base_families, cjk_region_families(cjk_region)),
+        emoji: build_font_family_variant(&base_families, AUTO_FALLBACK_EMOJI),
+        nerd: build_font_family_variant(&base_families, AUTO_FALLBACK_NF),
+        unicode: build_font_family_variant(&base_families, AUTO_FALLBACK_GLOBAL),
+    };
+
     let padding = expand_box(&config.padding);
     let margin = expand_box(&config.margin);
     let mut pad_top = padding[0];
@@ -3521,7 +3391,7 @@ fn build_svg(
                             title_x,
                             title_y,
                             escape_attr(&config.title.color),
-                            escape_attr(font_family),
+                            escape_attr(&font_variants.default),
                             title_size,
                             anchor,
                             opacity_attr,
@@ -3535,7 +3405,7 @@ fn build_svg(
 
     svg.push_str(&format!(
         r#"<g font-family="{}" font-size="{:.2}px" clip-path="url(#contentClip)">"#,
-        escape_attr(font_family),
+        escape_attr(&font_variants.default),
         config.font.size
     ));
     let mut bg_layer = String::new();
@@ -3600,11 +3470,21 @@ fn build_svg(
                 attrs.push_str(&format!(r#" text-decoration="{}""#, deco.join(" ")));
             }
 
-            text_layer.push_str(&format!(
-                r#"<tspan xml:space="preserve"{}>{}</tspan>"#,
-                attrs,
-                escape_text(text)
-            ));
+            for (group, chunk) in split_text_by_font_group(text) {
+                let mut chunk_attrs = attrs.clone();
+                let family = font_variants.for_group(group);
+                if !family.is_empty() {
+                    chunk_attrs.push_str(&format!(
+                        r#" font-family="{}""#,
+                        escape_attr(family)
+                    ));
+                }
+                text_layer.push_str(&format!(
+                    r#"<tspan xml:space="preserve"{}>{}</tspan>"#,
+                    chunk_attrs,
+                    escape_text(&chunk)
+                ));
+            }
             cursor_x += width_px;
         }
         text_layer.push_str("</text>");
@@ -5309,7 +5189,8 @@ mod tests {
             filename: filename.to_string(),
             tag: None,
         };
-        download_notofonts_file(&download, &temp, false).expect("skip");
+        let downloaded = download_notofonts_file(&download, &temp, false).expect("skip");
+        assert!(!downloaded);
         let _ = std::fs::remove_dir_all(&temp);
     }
 
