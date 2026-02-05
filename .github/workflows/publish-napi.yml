@@ -45,6 +45,9 @@ jobs:
         with:
           node-version: 20
 
+      - name: Ensure npm version
+        run: npm install -g npm@11.5.1
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -52,6 +55,10 @@ jobs:
       - name: Install Node deps
         working-directory: crates/cryosnap-node
         run: npm install
+
+      - name: Install cross (musl)
+        if: endsWith(matrix.target, '-unknown-linux-musl')
+        run: cargo install cross --locked
 
       - name: Install aarch64 GCC
         if: matrix.target == 'aarch64-unknown-linux-gnu'
