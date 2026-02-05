@@ -1,6 +1,6 @@
 {
   "name": "cryosnap",
-  "version": "0.2.8",
+  "version": "0.2.6",
   "description": "Node/TS bindings for cryosnap",
   "license": "MIT",
   "repository": {
