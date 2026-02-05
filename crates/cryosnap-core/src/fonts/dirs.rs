@@ -59,6 +59,9 @@ pub(crate) fn default_app_dir() -> Result<PathBuf> {
 }
 
 pub(crate) fn home_dir() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("HOME") {
+        return Some(PathBuf::from(path));
+    }
     if cfg!(windows) {
         if let Some(path) = env::var_os("USERPROFILE") {
             return Some(PathBuf::from(path));
