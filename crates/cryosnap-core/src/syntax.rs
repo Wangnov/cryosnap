@@ -13,28 +13,22 @@ pub(crate) fn highlight_code(
 ) -> Result<(Vec<Line>, String)> {
     static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines);
     static THEME_SET: Lazy<ThemeSet> = Lazy::new(ThemeSet::load_defaults);
+    static CHARM_THEME: Lazy<syntect::highlighting::Theme> = Lazy::new(charm_theme);
 
     let ps = &*SYNTAX_SET;
     let ts = &*THEME_SET;
 
-    let mut theme = ts
-        .themes
-        .get(theme_name)
-        .cloned()
-        .or_else(|| {
-            if theme_name.eq_ignore_ascii_case("charm") {
-                Some(charm_theme())
-            } else {
-                None
-            }
-        })
-        .or_else(|| ts.themes.get("base16-ocean.dark").cloned())
-        .or_else(|| ts.themes.values().next().cloned())
-        .ok_or_else(|| Error::Render("no themes available".to_string()))?;
-
-    if theme_name.eq_ignore_ascii_case("charm") {
-        theme = charm_theme();
-    }
+    let theme = if theme_name.eq_ignore_ascii_case("charm") {
+        &*CHARM_THEME
+    } else if let Some(theme) = ts.themes.get(theme_name) {
+        theme
+    } else if let Some(theme) = ts.themes.get("base16-ocean.dark") {
+        theme
+    } else if let Some(theme) = ts.themes.values().next() {
+        theme
+    } else {
+        return Err(Error::Render("no themes available".to_string()));
+    };
 
     let syntax = match language {
         Some(lang) => ps
@@ -58,7 +52,7 @@ pub(crate) fn highlight_code(
     let default_fg = theme.settings.foreground.unwrap_or(Color::WHITE);
     let default_fg_hex = color_to_hex(default_fg);
 
-    let mut highlighter = HighlightLines::new(syntax, &theme);
+    let mut highlighter = HighlightLines::new(syntax, theme);
     let mut lines = Vec::new();
 
     let raw_lines: Vec<&str> = text.split('\n').collect();
