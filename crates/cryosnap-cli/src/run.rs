@@ -249,14 +249,47 @@ pub(crate) fn run_with(
             if args.format.is_some() {
                 return Err("output patterns cannot be combined with --format".into());
             }
-            let svg = cryosnap_core::render_svg(&input, &config)?;
+            let mut outputs = Vec::with_capacity(expanded.len());
             for path in expanded {
                 let format = format_from_extension(&path)
                     .ok_or_else(|| format!("unknown output format: {}", path.display()))?;
+                outputs.push((path, format));
+            }
+
+            let wants_png = outputs
+                .iter()
+                .any(|(_, format)| matches!(format, OutputFormat::Png));
+            let wants_webp = outputs
+                .iter()
+                .any(|(_, format)| matches!(format, OutputFormat::Webp));
+
+            let planned = cryosnap_core::render_svg_planned(&input, &config)?;
+            let svg = planned.bytes;
+            let png_webp = if wants_png && wants_webp {
+                Some(cryosnap_core::render_png_webp_from_svg_once(
+                    &svg,
+                    &config,
+                    planned.needs_system_fonts,
+                )?)
+            } else {
+                None
+            };
+
+            for (path, format) in outputs {
                 let bytes = match format {
                     OutputFormat::Svg => svg.clone(),
-                    OutputFormat::Png => cryosnap_core::render_png_from_svg(&svg, &config)?,
-                    OutputFormat::Webp => cryosnap_core::render_webp_from_svg(&svg, &config)?,
+                    OutputFormat::Png => {
+                        match &png_webp {
+                            Some((png, _)) => png.clone(),
+                            None => cryosnap_core::render_png_from_svg(&svg, &config)?,
+                        }
+                    }
+                    OutputFormat::Webp => {
+                        match &png_webp {
+                            Some((_, webp)) => webp.clone(),
+                            None => cryosnap_core::render_webp_from_svg(&svg, &config)?,
+                        }
+                    }
                 };
                 std::fs::write(&path, bytes)?;
                 if stdout_is_tty {
