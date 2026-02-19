@@ -37,6 +37,20 @@ pub fn render_svg(input: &InputSource, config: &Config) -> Result<Vec<u8>> {
     Ok(render_svg_with_plan(input, config)?.bytes)
 }
 
+#[derive(Debug, Clone)]
+pub struct PlannedSvg {
+    pub bytes: Vec<u8>,
+    pub needs_system_fonts: bool,
+}
+
+pub fn render_svg_planned(input: &InputSource, config: &Config) -> Result<PlannedSvg> {
+    let rendered = render_svg_with_plan(input, config)?;
+    Ok(PlannedSvg {
+        bytes: rendered.bytes,
+        needs_system_fonts: rendered.font_plan.needs_system_fonts,
+    })
+}
+
 struct RenderedSvg {
     bytes: Vec<u8>,
     font_plan: FontPlan,

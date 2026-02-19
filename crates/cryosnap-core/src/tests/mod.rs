@@ -243,6 +243,19 @@ fn render_svg_basic() {
 }
 
 #[test]
+fn render_svg_planned_basic() {
+    let _lock = env_lock().lock().expect("lock");
+    let prev = std::env::var("CRYOSNAP_FONT_AUTO_DOWNLOAD").ok();
+    std::env::set_var("CRYOSNAP_FONT_AUTO_DOWNLOAD", "0");
+
+    let planned = render_svg_planned(&InputSource::Text("hello".to_string()), &Config::default())
+        .expect("planned svg");
+    assert!(planned.bytes.starts_with(b"<svg"));
+
+    restore_env_var("CRYOSNAP_FONT_AUTO_DOWNLOAD", prev);
+}
+
+#[test]
 fn svg_font_face_css_respects_family() {
     let mut cfg = Config::default();
     let path = std::env::temp_dir().join(format!("cryosnap-font-test-{}.ttf", std::process::id()));
