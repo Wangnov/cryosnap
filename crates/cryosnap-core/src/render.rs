@@ -166,6 +166,29 @@ pub fn render_webp_from_svg(svg: &[u8], config: &Config) -> Result<Vec<u8>> {
     render_webp_from_svg_with_plan(svg, config, needs.needs_system_fonts)
 }
 
+pub fn render_png_webp_from_svg_once(
+    svg: &[u8],
+    config: &Config,
+    needs_system_fonts: bool,
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    if matches!(config.raster.backend, RasterBackend::Rsvg) {
+        return Err(Error::Render(
+            "rsvg backend does not support webp output".to_string(),
+        ));
+    }
+    let pixmap = rasterize_svg(svg, config, needs_system_fonts)?;
+    let png = if config.png.quantize {
+        quantize_pixmap_to_png(&pixmap, &config.png)?
+    } else {
+        pixmap
+            .encode_png()
+            .map_err(|err| Error::Render(format!("png encode: {err}")))?
+    };
+    let png = optimize_png(png, &config.png)?;
+    let webp = pixmap_to_webp(&pixmap)?;
+    Ok((png, webp))
+}
+
 fn render_webp_from_svg_with_plan(
     svg: &[u8],
     config: &Config,

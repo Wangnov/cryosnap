@@ -32,8 +32,8 @@ pub use config::{
     RasterBackend, RasterOptions, Shadow, TitleAlign, TitleOptions, TitlePathStyle,
 };
 pub use render::{
-    render, render_png, render_png_from_svg, render_svg, render_svg_planned, render_webp,
-    render_webp_from_svg, PlannedSvg,
+    render, render_png, render_png_from_svg, render_png_webp_from_svg_once, render_svg,
+    render_svg_planned, render_webp, render_webp_from_svg, PlannedSvg,
 };
 pub use types::{Error, InputSource, OutputFormat, RenderRequest, RenderResult, Result};
 

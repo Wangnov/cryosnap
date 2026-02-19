@@ -742,6 +742,31 @@ fn render_webp_basic() {
 }
 
 #[test]
+fn render_png_webp_from_svg_once_basic() {
+    let _lock = env_lock().lock().expect("lock");
+    let prev = std::env::var("CRYOSNAP_FONT_AUTO_DOWNLOAD").ok();
+    std::env::set_var("CRYOSNAP_FONT_AUTO_DOWNLOAD", "0");
+
+    let temp = temp_dir("png-webp-once");
+    let font_path = copy_asset_font("JetBrainsMono-Regular.ttf", &temp);
+    let mut cfg = Config::default();
+    cfg.font.family = "JetBrains Mono".to_string();
+    cfg.font.file = Some(font_path.to_string_lossy().to_string());
+    cfg.font.dirs = vec![temp.to_string_lossy().to_string()];
+    cfg.font.system_fallback = FontSystemFallback::Never;
+
+    let planned = render_svg_planned(&InputSource::Text("hi".to_string()), &cfg).expect("svg");
+    let (png, webp) =
+        render_png_webp_from_svg_once(&planned.bytes, &cfg, planned.needs_system_fonts)
+            .expect("render");
+    assert!(png.starts_with(b"\x89PNG"));
+    assert!(webp.starts_with(b"RIFF"));
+
+    restore_env_var("CRYOSNAP_FONT_AUTO_DOWNLOAD", prev);
+    let _ = std::fs::remove_dir_all(&temp);
+}
+
+#[test]
 fn raster_scale_defaults() {
     let cfg = Config::default();
     let scale = raster_scale(&cfg, 100, 100).expect("scale");
