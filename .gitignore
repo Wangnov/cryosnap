@@ -1,4 +1,5 @@
 /target
+/.worktrees
 /crates/cryosnap-node/node_modules
 /crates/cryosnap-node/*.node
 /tmp
