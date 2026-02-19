@@ -1027,19 +1027,24 @@ fn build_fontdb_loads_font_file_and_system_fonts() {
 #[test]
 fn build_fontdb_cache_reuses_and_invalidates() {
     let _lock = state_lock().lock().expect("lock");
-    invalidate_font_caches();
-    reset_fontdb_build_miss_count();
-
-    let cfg = Config::default();
-    let _ = build_fontdb(&cfg, false).expect("fontdb");
-    assert_eq!(fontdb_build_miss_count(), 1);
-
-    let _ = build_fontdb(&cfg, false).expect("fontdb");
-    assert_eq!(fontdb_build_miss_count(), 1);
+    let temp = temp_dir("fontdb-cache");
+    let mut cfg = Config::default();
+    cfg.font.dirs = vec![temp.to_string_lossy().to_string()];
+    cfg.font.system_fallback = FontSystemFallback::Never;
 
     invalidate_font_caches();
+    reset_fontdb_build_miss_count_for_tests();
+
     let _ = build_fontdb(&cfg, false).expect("fontdb");
-    assert_eq!(fontdb_build_miss_count(), 2);
+    assert_eq!(fontdb_build_miss_count_for_config(&cfg, false), 1);
+
+    let _ = build_fontdb(&cfg, false).expect("fontdb");
+    assert_eq!(fontdb_build_miss_count_for_config(&cfg, false), 1);
+
+    invalidate_font_caches();
+    let _ = build_fontdb(&cfg, false).expect("fontdb");
+    assert_eq!(fontdb_build_miss_count_for_config(&cfg, false), 2);
+    let _ = std::fs::remove_dir_all(&temp);
 }
 
 #[test]

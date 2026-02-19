@@ -10,32 +10,48 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 #[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::HashMap;
 
 const FONTDB_CACHE_CAPACITY: usize = 8;
 const APP_FAMILIES_CACHE_CAPACITY: usize = 8;
 
 #[cfg(test)]
-static FONTDB_BUILD_MISSES: AtomicUsize = AtomicUsize::new(0);
+static FONTDB_BUILD_MISSES: Lazy<Mutex<HashMap<FontDbCacheKey, usize>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[cfg(test)]
-pub(crate) fn reset_fontdb_build_miss_count() {
-    FONTDB_BUILD_MISSES.store(0, Ordering::Relaxed);
+pub(crate) fn reset_fontdb_build_miss_count_for_tests() {
+    FONTDB_BUILD_MISSES.lock().expect("font miss lock").clear();
 }
 
 #[cfg(test)]
-pub(crate) fn fontdb_build_miss_count() -> usize {
-    FONTDB_BUILD_MISSES.load(Ordering::Relaxed)
+pub(crate) fn fontdb_build_miss_count_for_config(
+    config: &Config,
+    needs_system_fonts: bool,
+) -> usize {
+    let Ok(dirs) = resolve_font_dirs(config) else {
+        return 0;
+    };
+    let key = FontDbCacheKey {
+        dirs_key: dirs_cache_key(&dirs),
+        font_file: config.font.file.as_ref().map(|v| font_file_key(v)),
+        needs_system_fonts,
+    };
+    *FONTDB_BUILD_MISSES
+        .lock()
+        .expect("font miss lock")
+        .get(&key)
+        .unwrap_or(&0)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct FontFileKey {
     path: String,
     len: u64,
     modified_ns: Option<u128>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct FontDbCacheKey {
     dirs_key: String,
     font_file: Option<FontFileKey>,
@@ -48,7 +64,8 @@ struct FontCacheState {
     app_families: VecDeque<(String, HashSet<String>)>,
 }
 
-static FONT_CACHE: Lazy<Mutex<FontCacheState>> = Lazy::new(|| Mutex::new(FontCacheState::default()));
+static FONT_CACHE: Lazy<Mutex<FontCacheState>> =
+    Lazy::new(|| Mutex::new(FontCacheState::default()));
 
 pub(crate) fn invalidate_font_caches() {
     let mut cache = FONT_CACHE.lock().expect("font cache lock");
@@ -246,7 +263,10 @@ pub(crate) fn build_fontdb(
     }
 
     #[cfg(test)]
-    FONTDB_BUILD_MISSES.fetch_add(1, Ordering::Relaxed);
+    {
+        let mut misses = FONTDB_BUILD_MISSES.lock().expect("font miss lock");
+        *misses.entry(key.clone()).or_insert(0) += 1;
+    }
 
     let mut fontdb = usvg::fontdb::Database::new();
     if let Some(font_file) = &config.font.file {
