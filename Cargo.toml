@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.10"
+version = "0.2.11"
 edition = "2021"
 license = "MIT"
 
@@ -19,7 +19,7 @@ thiserror = "2.0.18"
 napi = { version = "3.8.2", features = ["napi6"] }
 napi-derive = "3.5.1"
 napi-build = "2.3.1"
-cryosnap-core = { path = "crates/cryosnap-core", version = "0.2.10" }
+cryosnap-core = { path = "crates/cryosnap-core", version = "0.2.11" }
 
 [workspace.metadata.release]
 tag-name = "v{{version}}"
