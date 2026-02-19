@@ -41,8 +41,7 @@ fn parse_config_cached(json: &str) -> std::result::Result<Config, serde_json::Er
 }
 
 #[cfg(test)]
-static CONFIG_PARSE_MISSES: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+static CONFIG_PARSE_MISSES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[cfg(test)]
 fn reset_config_cache_for_tests() {

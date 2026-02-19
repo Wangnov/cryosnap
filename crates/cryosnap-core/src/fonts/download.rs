@@ -4,7 +4,9 @@ use super::constants::{
 };
 use super::dirs::{default_app_dir, resolve_font_dirs};
 use super::models::{FontFallbackNeeds, ScriptDownload, ScriptFontPlan};
-use super::system::{family_key, invalidate_font_caches, load_app_font_families, load_system_font_families};
+use super::system::{
+    family_key, invalidate_font_caches, load_app_font_families, load_system_font_families,
+};
 use crate::{Config, Error, FontSystemFallback, Result};
 use once_cell::sync::Lazy;
 use serde::Deserialize;

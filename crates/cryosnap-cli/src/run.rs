@@ -278,18 +278,14 @@ pub(crate) fn run_with(
             for (path, format) in outputs {
                 let bytes = match format {
                     OutputFormat::Svg => svg.clone(),
-                    OutputFormat::Png => {
-                        match &png_webp {
-                            Some((png, _)) => png.clone(),
-                            None => cryosnap_core::render_png_from_svg(&svg, &config)?,
-                        }
-                    }
-                    OutputFormat::Webp => {
-                        match &png_webp {
-                            Some((_, webp)) => webp.clone(),
-                            None => cryosnap_core::render_webp_from_svg(&svg, &config)?,
-                        }
-                    }
+                    OutputFormat::Png => match &png_webp {
+                        Some((png, _)) => png.clone(),
+                        None => cryosnap_core::render_png_from_svg(&svg, &config)?,
+                    },
+                    OutputFormat::Webp => match &png_webp {
+                        Some((_, webp)) => webp.clone(),
+                        None => cryosnap_core::render_webp_from_svg(&svg, &config)?,
+                    },
                 };
                 std::fs::write(&path, bytes)?;
                 if stdout_is_tty {
