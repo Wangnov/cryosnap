@@ -107,6 +107,12 @@ pub fn version() -> String {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, OnceLock};
+
+    fn state_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn temp_dir(prefix: &str) -> std::path::PathBuf {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -138,11 +144,13 @@ mod tests {
 
     #[test]
     fn version_non_empty() {
+        let _lock = state_lock().lock().expect("lock");
         assert!(!version().is_empty());
     }
 
     #[test]
     fn render_svg_from_text_default() {
+        let _lock = state_lock().lock().expect("lock");
         let prev = with_auto_download_disabled();
         let options = RenderOptions {
             input: "hello".to_string(),
@@ -157,6 +165,7 @@ mod tests {
 
     #[test]
     fn render_png_from_file() {
+        let _lock = state_lock().lock().expect("lock");
         let prev = with_auto_download_disabled();
         let temp = temp_dir("input");
         let path = temp.join("input.txt");
@@ -175,6 +184,7 @@ mod tests {
 
     #[test]
     fn render_webp_from_text() {
+        let _lock = state_lock().lock().expect("lock");
         let prev = with_auto_download_disabled();
         let options = RenderOptions {
             input: "hello".to_string(),
@@ -189,6 +199,7 @@ mod tests {
 
     #[test]
     fn render_rejects_invalid_config_json() {
+        let _lock = state_lock().lock().expect("lock");
         let options = RenderOptions {
             input: "hello".to_string(),
             input_kind: None,
@@ -201,6 +212,7 @@ mod tests {
 
     #[test]
     fn render_reuses_cached_config_json() {
+        let _lock = state_lock().lock().expect("lock");
         let prev = with_auto_download_disabled();
         reset_config_cache_for_tests();
         reset_config_parse_miss_count_for_tests();
