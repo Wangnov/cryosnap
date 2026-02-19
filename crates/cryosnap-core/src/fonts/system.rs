@@ -4,7 +4,118 @@ use super::constants::{
 use super::dirs::resolve_font_dirs;
 use super::models::{FontFallbackNeeds, FontPlan};
 use crate::{Config, FontSystemFallback, Result};
-use std::collections::HashSet;
+use once_cell::sync::Lazy;
+use std::collections::{HashSet, VecDeque};
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+const FONTDB_CACHE_CAPACITY: usize = 8;
+const APP_FAMILIES_CACHE_CAPACITY: usize = 8;
+
+#[cfg(test)]
+static FONTDB_BUILD_MISSES: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(crate) fn reset_fontdb_build_miss_count() {
+    FONTDB_BUILD_MISSES.store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(crate) fn fontdb_build_miss_count() -> usize {
+    FONTDB_BUILD_MISSES.load(Ordering::Relaxed)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FontFileKey {
+    path: String,
+    len: u64,
+    modified_ns: Option<u128>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FontDbCacheKey {
+    dirs_key: String,
+    font_file: Option<FontFileKey>,
+    needs_system_fonts: bool,
+}
+
+#[derive(Default)]
+struct FontCacheState {
+    fontdb: VecDeque<(FontDbCacheKey, usvg::fontdb::Database)>,
+    app_families: VecDeque<(String, HashSet<String>)>,
+}
+
+static FONT_CACHE: Lazy<Mutex<FontCacheState>> = Lazy::new(|| Mutex::new(FontCacheState::default()));
+
+pub(crate) fn invalidate_font_caches() {
+    let mut cache = FONT_CACHE.lock().expect("font cache lock");
+    cache.fontdb.clear();
+    cache.app_families.clear();
+}
+
+fn dirs_cache_key(dirs: &[PathBuf]) -> String {
+    dirs.iter()
+        .map(|dir| dir.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn font_file_key(path: &str) -> FontFileKey {
+    let metadata = std::fs::metadata(path).ok();
+    let len = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+    let modified_ns = metadata
+        .and_then(|m| m.modified().ok())
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos());
+    FontFileKey {
+        path: path.to_string(),
+        len,
+        modified_ns,
+    }
+}
+
+fn fontdb_cache_get(key: &FontDbCacheKey) -> Option<usvg::fontdb::Database> {
+    let mut cache = FONT_CACHE.lock().expect("font cache lock");
+    let pos = cache.fontdb.iter().position(|(k, _)| k == key)?;
+    let (k, db) = cache.fontdb.remove(pos)?;
+    let out = db.clone();
+    cache.fontdb.push_back((k, db));
+    Some(out)
+}
+
+fn fontdb_cache_put(key: FontDbCacheKey, db: usvg::fontdb::Database) {
+    let mut cache = FONT_CACHE.lock().expect("font cache lock");
+    if let Some(pos) = cache.fontdb.iter().position(|(k, _)| k == &key) {
+        let _ = cache.fontdb.remove(pos);
+    }
+    cache.fontdb.push_back((key, db));
+    while cache.fontdb.len() > FONTDB_CACHE_CAPACITY {
+        cache.fontdb.pop_front();
+    }
+}
+
+fn app_families_cache_get(key: &str) -> Option<HashSet<String>> {
+    let mut cache = FONT_CACHE.lock().expect("font cache lock");
+    let pos = cache.app_families.iter().position(|(k, _)| k == key)?;
+    let (k, families) = cache.app_families.remove(pos)?;
+    let out = families.clone();
+    cache.app_families.push_back((k, families));
+    Some(out)
+}
+
+fn app_families_cache_put(key: String, families: HashSet<String>) {
+    let mut cache = FONT_CACHE.lock().expect("font cache lock");
+    if let Some(pos) = cache.app_families.iter().position(|(k, _)| k == &key) {
+        let _ = cache.app_families.remove(pos);
+    }
+    cache.app_families.push_back((key, families));
+    while cache.app_families.len() > APP_FAMILIES_CACHE_CAPACITY {
+        cache.app_families.pop_front();
+    }
+}
 
 pub(crate) fn push_family(out: &mut Vec<String>, seen: &mut HashSet<String>, name: &str) {
     let trimmed = name.trim();
@@ -122,12 +233,27 @@ pub(crate) fn build_fontdb(
     config: &Config,
     needs_system_fonts: bool,
 ) -> Result<usvg::fontdb::Database> {
+    let dirs = resolve_font_dirs(config)?;
+    let dirs_key = dirs_cache_key(&dirs);
+    let font_file = config.font.file.as_ref().map(|v| font_file_key(v));
+    let key = FontDbCacheKey {
+        dirs_key,
+        font_file,
+        needs_system_fonts,
+    };
+    if let Some(db) = fontdb_cache_get(&key) {
+        return Ok(db);
+    }
+
+    #[cfg(test)]
+    FONTDB_BUILD_MISSES.fetch_add(1, Ordering::Relaxed);
+
     let mut fontdb = usvg::fontdb::Database::new();
     if let Some(font_file) = &config.font.file {
         let bytes = std::fs::read(font_file)?;
         fontdb.load_font_data(bytes);
     }
-    for dir in resolve_font_dirs(config)? {
+    for dir in dirs {
         if dir.is_dir() {
             fontdb.load_fonts_dir(dir);
         }
@@ -135,6 +261,7 @@ pub(crate) fn build_fontdb(
     if needs_system_fonts {
         fontdb.load_system_fonts();
     }
+    fontdb_cache_put(key, fontdb.clone());
     Ok(fontdb)
 }
 
@@ -149,17 +276,28 @@ pub(crate) fn collect_font_families(db: &usvg::fontdb::Database) -> HashSet<Stri
 }
 
 pub(crate) fn load_app_font_families(config: &Config) -> Result<HashSet<String>> {
+    let dirs = resolve_font_dirs(config)?;
+    let key = dirs_cache_key(&dirs);
+    if let Some(families) = app_families_cache_get(&key) {
+        return Ok(families);
+    }
+
     let mut fontdb = usvg::fontdb::Database::new();
-    for dir in resolve_font_dirs(config)? {
+    for dir in dirs {
         if dir.is_dir() {
             fontdb.load_fonts_dir(dir);
         }
     }
-    Ok(collect_font_families(&fontdb))
+    let families = collect_font_families(&fontdb);
+    app_families_cache_put(key, families.clone());
+    Ok(families)
 }
 
 pub(crate) fn load_system_font_families() -> HashSet<String> {
-    let mut fontdb = usvg::fontdb::Database::new();
-    fontdb.load_system_fonts();
-    collect_font_families(&fontdb)
+    static SYSTEM_FAMILIES: Lazy<HashSet<String>> = Lazy::new(|| {
+        let mut fontdb = usvg::fontdb::Database::new();
+        fontdb.load_system_fonts();
+        collect_font_families(&fontdb)
+    });
+    SYSTEM_FAMILIES.clone()
 }
