@@ -4,7 +4,7 @@ use super::constants::{
 };
 use super::dirs::{default_app_dir, resolve_font_dirs};
 use super::models::{FontFallbackNeeds, ScriptDownload, ScriptFontPlan};
-use super::system::{family_key, load_app_font_families, load_system_font_families};
+use super::system::{family_key, invalidate_font_caches, load_app_font_families, load_system_font_families};
 use crate::{Config, Error, FontSystemFallback, Result};
 use once_cell::sync::Lazy;
 use serde::Deserialize;
@@ -435,6 +435,7 @@ pub(crate) fn ensure_fonts_available(
         download_log(DownloadLogLevel::Debug, "no font downloads required");
         return Ok(());
     }
+    let mut downloaded_any = false;
     let font_dirs = resolve_font_dirs(config)?;
     let Some(primary_dir) = font_dirs.first() else {
         return Ok(());
@@ -465,10 +466,13 @@ pub(crate) fn ensure_fonts_available(
             }
         }
         match download_notofonts_file(download, primary_dir, force_update) {
-            Ok(true) => download_log(
-                DownloadLogLevel::Info,
-                format!("downloaded font {}", download.family),
-            ),
+            Ok(true) => {
+                downloaded_any = true;
+                download_log(
+                    DownloadLogLevel::Info,
+                    format!("downloaded font {}", download.family),
+                )
+            }
             Ok(false) => download_log(
                 DownloadLogLevel::Debug,
                 format!("font up-to-date {}", download.family),
@@ -485,10 +489,13 @@ pub(crate) fn ensure_fonts_available(
         && !(allow_system && any_family_present(&[FONT_PACKAGE_NF.family], &system_families))
     {
         match download_font_package(&FONT_PACKAGE_NF, primary_dir) {
-            Ok(true) => download_log(
-                DownloadLogLevel::Info,
-                format!("downloaded font {}", FONT_PACKAGE_NF.family),
-            ),
+            Ok(true) => {
+                downloaded_any = true;
+                download_log(
+                    DownloadLogLevel::Info,
+                    format!("downloaded font {}", FONT_PACKAGE_NF.family),
+                )
+            }
             Ok(false) => download_log(
                 DownloadLogLevel::Debug,
                 format!("font up-to-date {}", FONT_PACKAGE_NF.family),
@@ -520,10 +527,13 @@ pub(crate) fn ensure_fonts_available(
                 }
             }
             match download_raw_font(cjk_region_urls(region), primary_dir, filename, force_update) {
-                Ok(true) => download_log(
-                    DownloadLogLevel::Info,
-                    format!("downloaded font {}", filename),
-                ),
+                Ok(true) => {
+                    downloaded_any = true;
+                    download_log(
+                        DownloadLogLevel::Info,
+                        format!("downloaded font {}", filename),
+                    )
+                }
                 Ok(false) => download_log(
                     DownloadLogLevel::Debug,
                     format!("font up-to-date {}", filename),
@@ -545,6 +555,7 @@ pub(crate) fn ensure_fonts_available(
             if !app_has || (force_update && target.exists()) {
                 match download_raw_font(NOTO_EMOJI_URLS, primary_dir, filename, force_update) {
                     Ok(true) => {
+                        downloaded_any = true;
                         download_log(DownloadLogLevel::Info, "downloaded font Noto Color Emoji")
                     }
                     Ok(false) => {
@@ -559,6 +570,9 @@ pub(crate) fn ensure_fonts_available(
         }
     }
 
+    if downloaded_any {
+        invalidate_font_caches();
+    }
     Ok(())
 }
 
