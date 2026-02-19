@@ -38,7 +38,7 @@
   },
   "png": {
     "optimize": true,
-    "level": 4,
+    "level": 0,
     "strip": "safe",
     "quantize": false,
     "quantize_quality": 85,

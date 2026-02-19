@@ -97,7 +97,7 @@ cryosnap --config user
 
 ### PNG 压缩
 
-默认使用无损优化（不会影响画质）：
+默认启用无损优化（不会影响画质），默认优化级别为 **0（速度优先）**：
 
 ```bash
 # 关闭无损优化
@@ -380,7 +380,7 @@ Config path priority:
 
 ### PNG Optimization
 
-Lossless optimization (no quality loss):
+Lossless optimization (no quality loss). Enabled by default, with **level 0 (speed-first)**:
 
 ```bash
 # Disable lossless optimization
